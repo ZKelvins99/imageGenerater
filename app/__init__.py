@@ -1,0 +1,1 @@
+"""ImageGenerater application package."""

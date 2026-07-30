@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Local config & data (never commit secrets / generated assets)
+config/settings.json
+config/secrets.json
+data/history.jsonl
+data/outputs/*
+!data/outputs/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.png
+!static/**/*.png
+test_output.png

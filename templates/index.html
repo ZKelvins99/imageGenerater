@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ImageGenerater</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+<body x-data="app()" x-init="init()">
+  <div class="shell" :class="{ 'settings-open': showSettings }">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">IG</span>
+        <div>
+          <div class="brand-name">ImageGenerater</div>
+          <div class="brand-sub">本地生图工作室</div>
+        </div>
+      </div>
+
+      <button class="btn-new" @click="newSession()" type="button">＋ 新建生成</button>
+
+      <div class="sidebar-section-label">历史记录</div>
+      <div class="history-list">
+        <template x-if="history.length === 0">
+          <div class="empty-side">还没有记录</div>
+        </template>
+        <template x-for="item in history" :key="item.id">
+          <button
+            type="button"
+            class="history-item"
+            :class="{ active: selectedId === item.id }"
+            @click="selectHistory(item)"
+          >
+            <div class="hi-top">
+              <span class="hi-mode" x-text="item.mode === 'text' ? '文生图' : '图生图'"></span>
+              <span class="hi-status" :class="item.status" x-text="statusLabel(item.status)"></span>
+            </div>
+            <div class="hi-prompt" x-text="item.prompt"></div>
+            <div class="hi-meta" x-text="item.created_at"></div>
+          </button>
+        </template>
+      </div>
+
+      <div class="sidebar-foot">
+        <button type="button" class="linkish" @click="showSettings = true">设置</button>
+        <span class="ws-dot" :class="wsState" :title="wsState"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="main-header">
+        <div class="tabs">
+          <button type="button" :class="{ active: mode === 'text' }" @click="mode = 'text'">文生图</button>
+          <button type="button" :class="{ active: mode === 'image' }" @click="mode = 'image'">图生图</button>
+        </div>
+        <div class="header-actions">
+          <template x-if="selected && selected.status === 'done' && selected.output_urls?.length">
+            <div class="inline-actions">
+              <a class="btn ghost" :href="selected.output_urls[0]" download>下载</a>
+              <button type="button" class="btn ghost" @click="reuseSelected()">再生成</button>
+              <button type="button" class="btn danger ghost" @click="deleteSelected()">删除</button>
+            </div>
+          </template>
+        </div>
+      </header>
+
+      <section class="preview-stage">
+        <template x-if="taskBusy">
+          <div class="preview-card generating">
+            <div class="pulse"></div>
+            <div class="gen-title" x-text="taskMessage || '正在生成…'"></div>
+            <div class="progress-track"><div class="progress-bar" :style="`width:${Math.round(taskProgress*100)}%`"></div></div>
+          </div>
+        </template>
+
+        <template x-if="!taskBusy && previewUrls.length">
+          <div class="preview-grid" :class="{ multi: previewUrls.length > 1 }">
+            <template x-for="(url, i) in previewUrls" :key="url + i">
+              <figure class="preview-card result">
+                <img :src="url" alt="generated" @click="lightbox = url" />
+              </figure>
+            </template>
+          </div>
+        </template>
+
+        <template x-if="!taskBusy && !previewUrls.length">
+          <div class="preview-empty">
+            <h1>今天想生成什么？</h1>
+            <p>支持文生图与图生图，模型与参数可在下方配置。结果会保存在本地历史中。</p>
+          </div>
+        </template>
+
+        <template x-if="taskError">
+          <div class="error-banner" x-text="taskError"></div>
+        </template>
+      </section>
+
+      <footer class="composer">
+        <div class="key-banner" x-show="!settings.base_url || !settings.api_key_set || !settings.default_model" x-cloak>
+          请先在设置中填写 Base URL、API Key 和默认模型（本地保存，不会进 git）。
+          <button type="button" class="btn tiny" @click="showSettings = true">去设置</button>
+        </div>
+        <div class="composer-card">
+          <template x-if="mode === 'image'">
+            <div class="ref-row">
+              <label class="ref-upload">
+                <input type="file" accept="image/*" @change="onFile($event)" />
+                <span x-text="refFileName || (refPath ? '已选择参考图（来自历史）' : '上传参考图')"></span>
+              </label>
+              <template x-if="refPreview">
+                <img class="ref-thumb" :src="refPreview" alt="ref" />
+              </template>
+              <button type="button" class="btn ghost tiny" x-show="refFile || refPath" @click="clearRef()">清除</button>
+            </div>
+          </template>
+
+          <textarea
+            x-model="prompt"
+            rows="3"
+            placeholder="描述你想生成或修改的画面…"
+            @keydown.ctrl.enter.prevent="submit()"
+            @keydown.meta.enter.prevent="submit()"
+          ></textarea>
+
+          <div class="composer-toolbar">
+            <div class="controls">
+              <label>
+                模型
+                <select x-model="model">
+                  <template x-for="m in models" :key="m.id">
+                    <option :value="m.id" x-text="m.id"></option>
+                  </template>
+                </select>
+              </label>
+              <label class="check">
+                <input type="checkbox" x-model="showAllModels" @change="loadModels()" />
+                全部模型
+              </label>
+              <label>
+                尺寸
+                <select x-model="size">
+                  <option value="1024x1024">1024×1024</option>
+                  <option value="1024x1536">1024×1536</option>
+                  <option value="1536x1024">1536×1024</option>
+                  <option value="2048x2048">2048×2048</option>
+                </select>
+              </label>
+              <label>
+                质量
+                <select x-model="quality">
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="auto">auto</option>
+                </select>
+              </label>
+              <label>
+                数量
+                <select x-model.number="n">
+                  <option :value="1">1</option>
+                  <option :value="2">2</option>
+                  <option :value="3">3</option>
+                  <option :value="4">4</option>
+                </select>
+              </label>
+            </div>
+            <button
+              type="button"
+              class="btn primary"
+              :disabled="taskBusy || !prompt.trim() || (mode === 'image' && !refFile && !refPath)"
+              @click="submit()"
+            >
+              <span x-text="taskBusy ? '生成中…' : '生成'"></span>
+            </button>
+          </div>
+        </div>
+        <div class="hint">Ctrl / ⌘ + Enter 发送 · 结果保存在本地 data/</div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Settings drawer -->
+  <div class="overlay" x-show="showSettings" x-transition.opacity @click="showSettings = false"></div>
+  <aside class="settings-panel" x-show="showSettings" x-transition:enter="slide-in" @click.outside="showSettings = false">
+    <div class="settings-head">
+      <h2>设置</h2>
+      <button type="button" class="btn ghost" @click="showSettings = false">关闭</button>
+    </div>
+    <form class="settings-form" @submit.prevent="saveSettings()">
+      <label>Base URL
+        <input x-model="settings.base_url" placeholder="例如 https://your-gateway.example/ 或 http://host:port" required />
+      </label>
+      <label>API Key
+        <input x-model="settings.api_key" type="password" :placeholder="settings.api_key_set ? (settings.api_key_masked + '（留空则不修改）') : '填写你自己的 token'" />
+      </label>
+      <label>默认模型
+        <input x-model="settings.default_model" placeholder="例如 gpt-image-2" required />
+      </label>
+      <label>默认尺寸
+        <input x-model="settings.default_size" />
+      </label>
+      <label>默认质量
+        <select x-model="settings.default_quality">
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="auto">auto</option>
+        </select>
+      </label>
+      <label>默认数量 n
+        <input type="number" min="1" max="4" x-model.number="settings.default_n" />
+      </label>
+      <label>模型过滤关键词（逗号分隔）
+        <input x-model="filterKeywordsText" placeholder="image,dall-e,gpt-image" />
+      </label>
+      <p class="settings-note">API Key 保存在本地 <code>config/secrets.json</code>，其它配置在 <code>config/settings.json</code>，均不会上传到 git。每人自行填写自己的 Key。</p>
+      <div class="settings-actions">
+        <button type="submit" class="btn primary">保存</button>
+        <span class="save-msg" x-text="settingsMsg"></span>
+      </div>
+    </form>
+  </aside>
+
+  <div class="lightbox" x-show="lightbox" @click="lightbox = null" x-transition>
+    <img :src="lightbox" alt="preview" />
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

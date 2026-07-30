@@ -1,0 +1,10 @@
+{
+  "base_url": "",
+  "default_model": "",
+  "default_size": "1024x1024",
+  "default_quality": "medium",
+  "default_n": 1,
+  "model_filter_keywords": [],
+  "host": "127.0.0.1",
+  "port": 27183
+}
