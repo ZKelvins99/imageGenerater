@@ -40,6 +40,8 @@ class ProviderProfile(BaseModel):
     timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     capability_overrides: dict[str, Any] = Field(default_factory=dict)
+    responses_enabled: bool = False
+    responses_model: str = ""
     token_distributor: TokenDistributorConfig | None = None
     # Soft-delete flag; soft-deleted providers are hidden from selection
     deleted: bool = False
@@ -69,6 +71,8 @@ class ProviderCreate(BaseModel):
     timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     capability_overrides: dict[str, Any] = Field(default_factory=dict)
+    responses_enabled: bool = False
+    responses_model: str = ""
     token_distributor: TokenDistributorConfig | None = None
     # Secrets accepted on create; never echoed back
     api_key: str | None = None
@@ -87,6 +91,8 @@ class ProviderUpdate(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0, le=3600)
     extra_headers: dict[str, str] | None = None
     capability_overrides: dict[str, Any] | None = None
+    responses_enabled: bool | None = None
+    responses_model: str | None = None
     token_distributor: TokenDistributorConfig | None = None
     api_key: str | None = None
     distributor_client_id: str | None = None
@@ -107,6 +113,8 @@ class ProviderPublic(BaseModel):
     timeout_seconds: float
     extra_headers: dict[str, str]
     capability_overrides: dict[str, Any]
+    responses_enabled: bool
+    responses_model: str
     token_distributor: TokenDistributorConfig | None
     deleted: bool
     api_key_set: bool

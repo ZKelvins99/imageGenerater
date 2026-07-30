@@ -261,6 +261,25 @@ async def link_job_asset(
     await conn.commit()
 
 
+async def replace_job_asset_at_position(
+    job_id: str, asset_id: str, role: str, position: int
+) -> None:
+    """Keep one current asset for a role/position, used by progressive previews."""
+    conn = await db_conn.connect()
+    await conn.execute(
+        "DELETE FROM job_assets WHERE job_id = ? AND role = ? AND position = ?",
+        (job_id, role, position),
+    )
+    await conn.execute(
+        """
+        INSERT OR REPLACE INTO job_assets(job_id, asset_id, role, position)
+        VALUES (?, ?, ?, ?)
+        """,
+        (job_id, asset_id, role, position),
+    )
+    await conn.commit()
+
+
 async def list_job_assets(job_id: str, role: str | None = None) -> list[dict[str, Any]]:
     conn = await db_conn.connect()
     if role:

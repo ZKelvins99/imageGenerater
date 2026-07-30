@@ -14,6 +14,8 @@ router = APIRouter(prefix="/api/v1", tags=["jobs"])
 async def _to_public(job) -> JobPublic:
     assets = await job_repo.list_job_assets(job.id, role="output")
     urls = [f"/media/{a['storage_path']}" for a in assets]
+    partial_assets = await job_repo.list_job_assets(job.id, role="partial")
+    partial_urls = [f"/media/{a['storage_path']}" for a in partial_assets]
     if not urls:
         urls = [output_url(p) for p in (job.request_snapshot.get("output_paths") or [])]
     return JobPublic(
@@ -27,6 +29,7 @@ async def _to_public(job) -> JobPublic:
         provider_id=job.provider_id,
         request_snapshot=job.request_snapshot,
         output_urls=urls,
+        partial_urls=partial_urls,
         error_code=job.error_code,
         error=job.error_message_public,
         created_at=job.created_at,

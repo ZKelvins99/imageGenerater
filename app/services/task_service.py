@@ -284,7 +284,14 @@ class TaskManager:
         await job_repo.update_job_status(
             job_id,
             new_status="cancelled",
-            expected_statuses={"cancel_requested", "queued", "preparing", "running"},
+            expected_statuses={
+                "cancel_requested",
+                "queued",
+                "preparing",
+                "running",
+                "streaming",
+                "saving",
+            },
             progress=1.0,
             message="已取消",
             error_code="CANCELLED",
@@ -510,7 +517,55 @@ class TaskManager:
                         profile = get_provider(job.provider_id)
                     except Exception:
                         profile = None
-                gen_result = await images_adapter.generate(req, profile=profile)
+                async def on_partial(index: int, blob: bytes) -> None:
+                    if await self._is_cancel_requested(job_id):
+                        raise AppError(
+                            "用户取消",
+                            code="CANCELLED",
+                            status_code=499,
+                        )
+                    partial = await asset_service.save_bytes_as_asset(
+                        blob,
+                        category="partial",
+                        original_filename=f"{job_id}-partial-{index}.png",
+                        parent_job_id=job_id,
+                    )
+                    await job_repo.replace_job_asset_at_position(
+                        job_id,
+                        partial.id,
+                        role="partial",
+                        position=index,
+                    )
+                    partial_count = max(1, int(req.partial_images or 1))
+                    progress = min(0.78, 0.3 + (index + 1) / (partial_count + 1) * 0.45)
+                    await job_repo.update_job_status(
+                        job_id,
+                        new_status="streaming",
+                        expected_statuses={"running", "streaming"},
+                        progress=progress,
+                        message=f"已收到第 {index + 1} 张渐进预览",
+                    )
+                    current = await job_repo.get_job(job_id)
+                    if current:
+                        await self._emit(job_to_task_status(current))
+                    if self._broadcast:
+                        await self._broadcast(
+                            {
+                                "type": "job.partial_image",
+                                "payload": {
+                                    "job_id": job_id,
+                                    "partial_image_index": index,
+                                    "asset_id": partial.id,
+                                    "url": f"/media/{partial.storage_path}",
+                                },
+                            }
+                        )
+
+                gen_result = await images_adapter.generate(
+                    req,
+                    profile=profile,
+                    on_partial=on_partial,
+                )
                 result_images = gen_result.images
                 upstream_request_id = gen_result.upstream_request_id
                 sent_params = gen_result.sent_params

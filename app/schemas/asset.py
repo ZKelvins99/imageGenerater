@@ -46,6 +46,7 @@ class JobPublic(BaseModel):
     provider_id: str | None = None
     request_snapshot: dict[str, Any] = Field(default_factory=dict)
     output_urls: list[str] = Field(default_factory=list)
+    partial_urls: list[str] = Field(default_factory=list)
     error_code: str | None = None
     error: str | None = None
     created_at: str

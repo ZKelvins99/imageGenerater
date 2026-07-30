@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import random
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +27,7 @@ from app.services.errors import (
     classify_http_error,
     extract_upstream_request_id,
 )
-from app.services.provider_client import request_with_401_retry
+from app.services.provider_client import request_with_401_retry, stream_with_401_retry
 from app.services.provider_service import get_active_provider, get_provider
 
 FORMAT_MIME = {
@@ -42,6 +44,7 @@ FORMAT_EXT = {
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_BASE_DELAY = 0.5
 DEFAULT_MAX_DELAY = 8.0
+PartialImageCallback = Callable[[int, bytes], Awaitable[None]]
 
 
 async def generate(
@@ -50,6 +53,7 @@ async def generate(
     profile: ProviderProfile | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    on_partial: PartialImageCallback | None = None,
 ) -> GenerationResult:
     """Execute a validated Images API generation/edit with controlled retries."""
     if profile is None:
@@ -70,7 +74,12 @@ async def generate(
         attempt += 1
         try:
             return await _dispatch_once(
-                req, profile, plan, transport=transport, attempt_count=attempt
+                req,
+                profile,
+                plan,
+                transport=transport,
+                attempt_count=attempt,
+                on_partial=on_partial,
             )
         except AppError as e:
             last_error = e
@@ -110,7 +119,18 @@ async def _dispatch_once(
     *,
     transport: httpx.AsyncBaseTransport | None,
     attempt_count: int,
+    on_partial: PartialImageCallback | None,
 ) -> GenerationResult:
+    if int(plan.get("partial_images") or 0) > 0:
+        return await _dispatch_stream_once(
+            req,
+            profile,
+            plan,
+            transport=transport,
+            attempt_count=attempt_count,
+            on_partial=on_partial,
+        )
+
     if req.mode == "generate":
         resp = await _post_generations(profile, plan, req, transport=transport)
     else:
@@ -144,13 +164,106 @@ async def _dispatch_once(
     )
 
 
-async def _post_generations(
+async def _dispatch_stream_once(
+    req: GenerationRequest,
     profile: ProviderProfile,
     plan: dict[str, Any],
-    req: GenerationRequest,
     *,
     transport: httpx.AsyncBaseTransport | None,
-) -> httpx.Response:
+    attempt_count: int,
+    on_partial: PartialImageCallback | None,
+) -> GenerationResult:
+    if req.mode == "generate":
+        body = _generation_body(plan, req)
+        body["stream"] = True
+        stream_args: dict[str, Any] = {"json": body}
+        endpoint = "/v1/images/generations"
+    else:
+        data, files = await _prepare_edit_request(profile, plan, req)
+        data["stream"] = "true"
+        stream_args = {"data": data, "files": files}
+        endpoint = "/v1/images/edits"
+
+    final_events: list[dict[str, Any]] = []
+    request_id: str | None = None
+    async with stream_with_401_retry(
+        profile,
+        "POST",
+        endpoint,
+        transport=transport,
+        **stream_args,
+    ) as resp:
+        if resp.status_code >= 400:
+            await resp.aread()
+            raise classify_http_error(resp)
+        request_id = extract_upstream_request_id(resp)
+        async for line in resp.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            raw = line[5:].strip()
+            if not raw or raw == "[DONE]":
+                continue
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise AppError(
+                    "上游流式事件不是合法 JSON",
+                    code="UPSTREAM_PROTOCOL_ERROR",
+                    request_id=request_id,
+                ) from e
+            event_type = str(event.get("type") or "")
+            if event_type.endswith(".partial_image"):
+                encoded = event.get("b64_json") or event.get("partial_image_b64")
+                if not encoded:
+                    continue
+                try:
+                    blob = base64.b64decode(encoded, validate=True)
+                except (ValueError, TypeError) as e:
+                    raise AppError(
+                        "上游 partial image Base64 无效",
+                        code="UPSTREAM_PROTOCOL_ERROR",
+                        request_id=request_id,
+                    ) from e
+                if on_partial:
+                    await on_partial(int(event.get("partial_image_index") or 0), blob)
+            elif event_type.endswith(".completed"):
+                final_events.append(event)
+            elif "data" in event:
+                final_events.append(event)
+
+    payload = _stream_final_payload(final_events)
+    images = _extract_images(payload, preferred_format=req.output_format)
+    revised = None
+    data_items = payload.get("data") or []
+    if data_items and isinstance(data_items[0], dict):
+        revised = data_items[0].get("revised_prompt")
+    return GenerationResult(
+        images=images,
+        upstream_request_id=request_id,
+        revised_prompt=revised,
+        attempt_count=attempt_count,
+        sent_params=plan,
+    )
+
+
+def _stream_final_payload(events: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in reversed(events):
+        if isinstance(event.get("data"), list):
+            return {"data": event["data"]}
+        encoded = event.get("b64_json") or event.get("result")
+        if encoded:
+            return {
+                "data": [
+                    {
+                        "b64_json": encoded,
+                        "revised_prompt": event.get("revised_prompt"),
+                    }
+                ]
+            }
+    raise AppError("上游流结束但未返回最终图片", code="UPSTREAM_PROTOCOL_ERROR")
+
+
+def _generation_body(plan: dict[str, Any], req: GenerationRequest) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": plan["model"],
         "prompt": req.prompt,
@@ -160,13 +273,20 @@ async def _post_generations(
         "output_format": plan["output_format"],
         "moderation": plan["moderation"],
     }
-    if "output_compression" in plan:
-        body["output_compression"] = plan["output_compression"]
-    if "background" in plan:
-        body["background"] = plan["background"]
-    if "partial_images" in plan:
-        body["partial_images"] = plan["partial_images"]
-    # Never send input_fidelity for gpt-image-2
+    for key in ("output_compression", "background", "partial_images"):
+        if key in plan:
+            body[key] = plan[key]
+    return body
+
+
+async def _post_generations(
+    profile: ProviderProfile,
+    plan: dict[str, Any],
+    req: GenerationRequest,
+    *,
+    transport: httpx.AsyncBaseTransport | None,
+) -> httpx.Response:
+    body = _generation_body(plan, req)
     return await request_with_401_retry(
         profile,
         "POST",
@@ -183,6 +303,22 @@ async def _post_edits(
     *,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
+    data, files = await _prepare_edit_request(profile, plan, req)
+    return await request_with_401_retry(
+        profile,
+        "POST",
+        "/v1/images/edits",
+        transport=transport,
+        data=data,
+        files=files,
+    )
+
+
+async def _prepare_edit_request(
+    profile: ProviderProfile,
+    plan: dict[str, Any],
+    req: GenerationRequest,
+) -> tuple[dict[str, str], list[tuple[str, tuple[str, bytes, str]]]]:
     asset_ids = list(req.input_asset_ids)
     if req.primary_asset_id and req.primary_asset_id not in asset_ids:
         asset_ids.insert(0, req.primary_asset_id)
@@ -286,14 +422,7 @@ async def _post_edits(
     if "partial_images" in plan:
         data["partial_images"] = str(plan["partial_images"])
 
-    return await request_with_401_retry(
-        profile,
-        "POST",
-        "/v1/images/edits",
-        transport=transport,
-        data=data,
-        files=files,
-    )
+    return data, files
 
 
 def _extract_images(

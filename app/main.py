@@ -11,6 +11,7 @@ from starlette.requests import Request
 from app.api import (
     asset_routes,
     config_routes,
+    conversation_routes,
     generate_routes,
     generation_routes,
     job_routes,
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(provider_routes.router)
     app.include_router(asset_routes.router)
     app.include_router(job_routes.router)
+    app.include_router(conversation_routes.router)
     app.include_router(ws_routes.router)
 
     app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")

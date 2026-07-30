@@ -26,7 +26,7 @@ async def test_migrate_runs_and_is_versioned(isolated_env: Path) -> None:
     await _init_db()
     v1 = await db_migrate.migrate()
     v2 = await db_migrate.migrate()
-    assert v1 == v2 == 1
+    assert v1 == v2 == 2
 
 
 @pytest.mark.asyncio

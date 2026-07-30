@@ -95,6 +95,45 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS response_conversations (
+          id TEXT PRIMARY KEY,
+          provider_id TEXT NOT NULL,
+          responses_model TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          root_job_id TEXT,
+          latest_response_id TEXT,
+          latest_turn_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_response_conversations_updated
+          ON response_conversations(updated_at);
+
+        CREATE TABLE IF NOT EXISTS response_turns (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          job_id TEXT NOT NULL,
+          parent_turn_id TEXT,
+          response_id TEXT NOT NULL,
+          previous_response_id TEXT,
+          prompt TEXT NOT NULL,
+          revised_prompt TEXT,
+          usage_json TEXT NOT NULL DEFAULT '{}',
+          image_call_id TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (conversation_id) REFERENCES response_conversations(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_response_turns_conversation
+          ON response_turns(conversation_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_response_turns_job
+          ON response_turns(job_id);
+        """,
+    ),
 ]
 
 

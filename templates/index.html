@@ -3,230 +3,623 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ImageGenerater</title>
+  <meta name="color-scheme" content="light" />
+  <title>ImageGenerater · AI 图像工作台</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/app.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
-<body x-data="app()" x-init="init()">
-  <div class="shell" :class="{ 'settings-open': showSettings }">
-    <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-mark">IG</span>
-        <div>
-          <div class="brand-name">ImageGenerater</div>
-          <div class="brand-sub">本地生图工作室</div>
+<body x-data="imageStudio()" x-init="init()" @keydown.escape.window="closeOverlays()" @beforeunload.window="dispose()">
+  <div class="app-shell" :class="{ 'nav-open': mobileNavOpen, 'studio-open': mobileStudioOpen }">
+    <aside class="nav-panel" aria-label="历史与导航">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">IG</div>
+        <div class="brand-copy">
+          <strong>ImageGenerater</strong>
+          <span>AI 图像工作台</span>
         </div>
+        <button class="icon-btn mobile-only" type="button" @click="mobileNavOpen = false" aria-label="关闭导航">×</button>
       </div>
 
-      <button class="btn-new" @click="newSession()" type="button">＋ 新建生成</button>
+      <button class="new-button" type="button" @click="newGeneration()">
+        <span aria-hidden="true">＋</span>
+        <span>新建创作</span>
+        <kbd>N</kbd>
+      </button>
 
-      <div class="sidebar-section-label">历史记录</div>
-      <div class="history-list">
-        <template x-if="history.length === 0">
-          <div class="empty-side">还没有记录</div>
+      <nav class="nav-sections" aria-label="视图">
+        <button type="button" :class="{ active: historyFilter === 'all' }" @click="setHistoryFilter('all')">
+          <span class="nav-icon">◫</span><span>全部创作</span><b x-text="jobs.length"></b>
+        </button>
+        <button type="button" :class="{ active: historyFilter === 'running' }" @click="setHistoryFilter('running')">
+          <span class="nav-icon">◌</span><span>进行中</span><b x-text="runningJobsCount"></b>
+        </button>
+        <button type="button" :class="{ active: historyFilter === 'favorite' }" @click="setHistoryFilter('favorite')">
+          <span class="nav-icon">☆</span><span>收藏</span><b x-text="favoriteCount"></b>
+        </button>
+      </nav>
+
+      <div class="history-head">
+        <span>最近创作</span>
+        <button class="icon-btn small" type="button" @click="loadJobs()" aria-label="刷新历史" title="刷新">↻</button>
+      </div>
+
+      <label class="search-box">
+        <span aria-hidden="true">⌕</span>
+        <input x-model.debounce.200ms="historyQuery" type="search" placeholder="搜索提示词或模型" aria-label="搜索历史" />
+      </label>
+      <div class="history-filters">
+        <select x-model="historyModeFilter" @change="historyVisible = 30" aria-label="按创作模式筛选">
+          <option value="">全部模式</option>
+          <option value="generate">文生图</option>
+          <option value="reference">参考合成</option>
+          <option value="edit_mask">局部编辑</option>
+        </select>
+        <select x-model="historyProviderFilter" @change="historyVisible = 30" aria-label="按 Provider 筛选">
+          <option value="">全部连接</option>
+          <template x-for="provider in providers" :key="provider.id">
+            <option :value="provider.id" x-text="provider.name"></option>
+          </template>
+        </select>
+      </div>
+
+      <div class="history-scroll">
+        <template x-if="loadingJobs">
+          <div class="history-skeleton" aria-label="正在加载">
+            <i></i><i></i><i></i>
+          </div>
         </template>
-        <template x-for="item in history" :key="item.id">
-          <button
-            type="button"
-            class="history-item"
-            :class="{ active: selectedId === item.id }"
-            @click="selectHistory(item)"
-          >
-            <div class="hi-top">
-              <span class="hi-mode" x-text="item.mode === 'text' ? '文生图' : '图生图'"></span>
-              <span class="hi-status" :class="item.status" x-text="statusLabel(item.status)"></span>
+        <template x-if="!loadingJobs && filteredJobs.length === 0">
+          <div class="nav-empty">
+            <span>◇</span>
+            <p>这里还没有创作</p>
+            <small>生成后的作品会保存在本地</small>
+          </div>
+        </template>
+        <template x-for="job in filteredJobs" :key="job.id">
+          <button class="history-card" :class="{ selected: selectedJob?.id === job.id }" type="button" @click="selectJob(job)">
+            <div class="history-thumb">
+              <template x-if="job.output_urls?.length">
+                <img :src="job.output_urls[0]" alt="" loading="lazy" />
+              </template>
+              <template x-if="!job.output_urls?.length">
+                <span x-text="modeIcon(job.request_snapshot?.mode)"></span>
+              </template>
             </div>
-            <div class="hi-prompt" x-text="item.prompt"></div>
-            <div class="hi-meta" x-text="item.created_at"></div>
+            <div class="history-copy">
+              <div class="history-line">
+                <strong x-text="truncate(job.request_snapshot?.prompt || '未命名创作', 28)"></strong>
+                <span class="status-dot" :class="job.status" :title="statusLabel(job.status)"></span>
+              </div>
+              <span x-text="`${modeLabel(job.request_snapshot?.mode)} · ${formatRelativeTime(job.created_at)}`"></span>
+            </div>
           </button>
         </template>
+        <button class="load-more" type="button" x-show="filteredJobCount > filteredJobs.length" @click="historyVisible += 30">
+          加载更多（<span x-text="`${filteredJobs.length}/${filteredJobCount}`"></span>）
+        </button>
       </div>
 
-      <div class="sidebar-foot">
-        <button type="button" class="linkish" @click="showSettings = true">设置</button>
-        <span class="ws-dot" :class="wsState" :title="wsState"></span>
+      <div class="nav-footer">
+        <button type="button" @click="openProviderSettings()">
+          <span class="nav-icon">⚙</span>
+          <span>连接与设置</span>
+        </button>
+        <div class="connection-pill" :class="wsState">
+          <i></i>
+          <span x-text="wsState === 'open' ? '实时连接' : '正在重连'"></span>
+        </div>
       </div>
     </aside>
 
-    <main class="main">
-      <header class="main-header">
-        <div class="tabs">
-          <button type="button" :class="{ active: mode === 'text' }" @click="mode = 'text'">文生图</button>
-          <button type="button" :class="{ active: mode === 'image' }" @click="mode = 'image'">图生图</button>
+    <div class="nav-scrim mobile-only" x-show="mobileNavOpen" x-transition.opacity @click="mobileNavOpen = false"></div>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn mobile-only" type="button" @click="mobileNavOpen = true" aria-label="打开导航">☰</button>
+          <div class="crumb">
+            <span x-text="selectedJob ? '创作详情' : '新建创作'"></span>
+            <small x-show="selectedJob" x-text="selectedJob?.id"></small>
+          </div>
         </div>
-        <div class="header-actions">
-          <template x-if="selected && selected.status === 'done' && selected.output_urls?.length">
-            <div class="inline-actions">
-              <a class="btn ghost" :href="selected.output_urls[0]" download>下载</a>
-              <button type="button" class="btn ghost" @click="reuseSelected()">再生成</button>
-              <button type="button" class="btn danger ghost" @click="deleteSelected()">删除</button>
-            </div>
-          </template>
+
+        <div class="topbar-center">
+          <label class="provider-switch">
+            <span class="provider-led" :class="{ ready: activeProvider?.enabled }"></span>
+            <select x-model="providerId" @change="changeProvider()" aria-label="选择连接">
+              <template x-for="provider in providers" :key="provider.id">
+                <option :value="provider.id" x-text="provider.name"></option>
+              </template>
+            </select>
+          </label>
+          <label class="model-switch">
+            <span>模型</span>
+            <select x-model="model" @change="loadCapabilities()" aria-label="选择模型">
+              <template x-for="item in modelOptions" :key="item.id">
+                <option :value="item.id" x-text="item.id"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="button subtle" type="button" @click="openProviderSettings()">管理连接</button>
+          <button class="icon-btn mobile-only" type="button" @click="mobileStudioOpen = true" aria-label="打开创作面板">✦</button>
         </div>
       </header>
 
-      <section class="preview-stage">
+      <section class="canvas-area" aria-live="polite">
         <template x-if="taskBusy">
-          <div class="preview-card generating">
-            <div class="pulse"></div>
-            <div class="gen-title" x-text="taskMessage || '正在生成…'"></div>
-            <div class="progress-track"><div class="progress-bar" :style="`width:${Math.round(taskProgress*100)}%`"></div></div>
+          <div class="generation-state">
+            <div class="partial-stage" x-show="partialPreviewUrls.length">
+              <div class="partial-stage-badge">
+                <span class="live-dot"></span>
+                <b x-text="`渐进预览 ${partialPreviewUrls.length}`"></b>
+              </div>
+              <div class="partial-stage-grid" :class="`count-${Math.min(partialPreviewUrls.length, 3)}`">
+                <template x-for="(url, index) in partialPreviewUrls" :key="url + index">
+                  <figure>
+                    <img :src="url" :alt="`渐进预览 ${index + 1}`" />
+                    <figcaption x-text="`预览 ${index + 1} · 非最终结果`"></figcaption>
+                  </figure>
+                </template>
+              </div>
+            </div>
+            <div class="generation-orb" x-show="!partialPreviewUrls.length">
+              <span></span><span></span><span></span>
+            </div>
+            <div>
+              <p class="eyebrow" x-text="statusLabel(activeJob?.status || 'running')"></p>
+              <h2 x-text="taskMessage || '正在构思画面…'"></h2>
+              <p>复杂图像可能需要一些时间，你可以保留在此页面等待。</p>
+            </div>
+            <div class="progress-shell" :class="{ indeterminate: activeJob?.progress_kind === 'indeterminate' }">
+              <div :style="`width:${Math.max(8, Math.round(taskProgress * 100))}%`"></div>
+            </div>
+            <button class="button danger-outline" type="button" @click="cancelActiveJob()">取消任务</button>
           </div>
         </template>
 
         <template x-if="!taskBusy && previewUrls.length">
-          <div class="preview-grid" :class="{ multi: previewUrls.length > 1 }">
-            <template x-for="(url, i) in previewUrls" :key="url + i">
-              <figure class="preview-card result">
-                <img :src="url" alt="generated" @click="lightbox = url" />
-              </figure>
-            </template>
+          <div class="results-wrap">
+            <div class="results-header">
+              <div>
+                <p class="eyebrow">生成结果</p>
+                <h1 x-text="selectedJob?.request_snapshot?.prompt || prompt"></h1>
+              </div>
+              <div class="results-actions">
+                <button class="button subtle" type="button" @click="downloadAll()">⇩ 下载全部</button>
+                <button class="button dark" type="button" @click="continueFromResult(previewUrls[0])">继续编辑</button>
+                <button class="button conversation-button" type="button"
+                  x-show="conversationAvailable || selectedJob?.request_snapshot?.conversation_id"
+                  @click="openConversation(selectedJob)">对话式编辑</button>
+              </div>
+            </div>
+            <div class="result-grid" :class="`count-${Math.min(previewUrls.length, 4)}`">
+              <template x-for="(url, index) in previewUrls" :key="url + index">
+                <article class="result-card">
+                  <button class="result-image" type="button" @click="openLightbox(url, index)" :aria-label="`放大结果 ${index + 1}`">
+                    <img :src="url" :alt="`生成结果 ${index + 1}`" />
+                  </button>
+                  <div class="result-card-bar">
+                    <span>结果 <b x-text="index + 1"></b></span>
+                    <div>
+                      <button class="icon-btn small" type="button" @click="toggleFavorite(selectedJob?.id)" :class="{ liked: isFavorite(selectedJob?.id) }" aria-label="收藏">☆</button>
+                      <a class="icon-btn small" :href="url" download :aria-label="`下载结果 ${index + 1}`">↓</a>
+                      <button class="icon-btn small" type="button" @click="continueFromResult(url)" aria-label="以此图继续编辑">↗</button>
+                    </div>
+                  </div>
+                </article>
+              </template>
+            </div>
+            <div class="detail-strip" x-show="selectedJob">
+              <span><small>模式</small><b x-text="modeLabel(selectedJob?.request_snapshot?.mode)"></b></span>
+              <span><small>模型</small><b x-text="selectedJob?.request_snapshot?.model || '—'"></b></span>
+              <span><small>尺寸</small><b x-text="selectedJob?.request_snapshot?.size || 'auto'"></b></span>
+              <span><small>质量</small><b x-text="selectedJob?.request_snapshot?.quality || 'auto'"></b></span>
+              <span><small>状态</small><b x-text="statusLabel(selectedJob?.status)"></b></span>
+              <span class="tag-cell"><small>标签</small><b x-text="jobTagText(selectedJob?.id) || '未标记'"></b></span>
+              <button class="button subtle" type="button" @click="addTag(selectedJob?.id)">＋ 标签</button>
+              <button class="button text-danger" type="button" @click="deleteSelectedJob()">删除记录</button>
+            </div>
           </div>
         </template>
 
         <template x-if="!taskBusy && !previewUrls.length">
-          <div class="preview-empty">
-            <h1>今天想生成什么？</h1>
-            <p>支持文生图与图生图，模型与参数可在下方配置。结果会保存在本地历史中。</p>
+          <div class="empty-canvas">
+            <div class="empty-art" aria-hidden="true">
+              <span></span><span></span><span></span>
+              <b>✦</b>
+            </div>
+            <p class="eyebrow">IMAGE STUDIO</p>
+            <h1>把想象变成画面</h1>
+            <p>从文字开始，或加入参考图片。所有作品与设置都只保存在你的本地环境。</p>
+            <div class="starter-chips">
+              <button type="button" @click="usePrompt('电影感的香港雨夜街道，霓虹灯倒映在湿润路面，广角摄影')">电影场景</button>
+              <button type="button" @click="usePrompt('极简产品摄影，柔和影棚光，浅灰背景，精致材质细节')">产品摄影</button>
+              <button type="button" @click="usePrompt('温暖的儿童绘本插画，一只小水獭在森林里收集星光')">绘本插画</button>
+            </div>
           </div>
         </template>
 
-        <template x-if="taskError">
-          <div class="error-banner" x-text="taskError"></div>
-        </template>
+        <div class="inline-error" x-show="taskError" x-transition>
+          <span>!</span>
+          <div><strong>未能完成生成</strong><p x-text="taskError"></p></div>
+          <button class="button subtle" type="button" x-show="selectedJob && (selectedJob.status === 'failed' || selectedJob.status === 'cancelled')" @click="retrySelectedJob()">重试</button>
+          <button class="icon-btn" type="button" @click="taskError = ''" aria-label="关闭错误">×</button>
+        </div>
       </section>
-
-      <footer class="composer">
-        <div class="key-banner" x-show="!settings.base_url || !settings.api_key_set || !settings.default_model" x-cloak>
-          请先在设置中填写 Base URL、API Key 和默认模型（本地保存，不会进 git）。
-          <button type="button" class="btn tiny" @click="showSettings = true">去设置</button>
-        </div>
-        <div class="composer-card">
-          <template x-if="mode === 'image'">
-            <div class="ref-row">
-              <label class="ref-upload">
-                <input type="file" accept="image/*" @change="onFile($event)" />
-                <span x-text="refFileName || (refPath ? '已选择参考图（来自历史）' : '上传参考图')"></span>
-              </label>
-              <template x-if="refPreview">
-                <img class="ref-thumb" :src="refPreview" alt="ref" />
-              </template>
-              <button type="button" class="btn ghost tiny" x-show="refFile || refPath" @click="clearRef()">清除</button>
-            </div>
-          </template>
-
-          <textarea
-            x-model="prompt"
-            rows="3"
-            placeholder="描述你想生成或修改的画面…"
-            @keydown.ctrl.enter.prevent="submit()"
-            @keydown.meta.enter.prevent="submit()"
-          ></textarea>
-
-          <div class="composer-toolbar">
-            <div class="controls">
-              <label>
-                模型
-                <select x-model="model">
-                  <template x-for="m in models" :key="m.id">
-                    <option :value="m.id" x-text="m.id"></option>
-                  </template>
-                </select>
-              </label>
-              <label class="check">
-                <input type="checkbox" x-model="showAllModels" @change="loadModels()" />
-                全部模型
-              </label>
-              <label>
-                尺寸
-                <select x-model="size">
-                  <option value="1024x1024">1024×1024</option>
-                  <option value="1024x1536">1024×1536</option>
-                  <option value="1536x1024">1536×1024</option>
-                  <option value="2048x2048">2048×2048</option>
-                </select>
-              </label>
-              <label>
-                质量
-                <select x-model="quality">
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="auto">auto</option>
-                </select>
-              </label>
-              <label>
-                数量
-                <select x-model.number="n">
-                  <option :value="1">1</option>
-                  <option :value="2">2</option>
-                  <option :value="3">3</option>
-                  <option :value="4">4</option>
-                </select>
-              </label>
-            </div>
-            <button
-              type="button"
-              class="btn primary"
-              :disabled="taskBusy || !prompt.trim() || (mode === 'image' && !refFile && !refPath)"
-              @click="submit()"
-            >
-              <span x-text="taskBusy ? '生成中…' : '生成'"></span>
-            </button>
-          </div>
-        </div>
-        <div class="hint">Ctrl / ⌘ + Enter 发送 · 结果保存在本地 data/</div>
-      </footer>
     </main>
+
+    <aside class="studio-panel" aria-label="创作设置">
+      <div class="studio-mobile-head mobile-only">
+        <strong>创作设置</strong>
+        <button class="icon-btn" type="button" @click="mobileStudioOpen = false" aria-label="关闭创作面板">×</button>
+      </div>
+
+      <div class="mode-tabs" role="tablist" aria-label="创作模式">
+        <button type="button" role="tab" :aria-selected="mode === 'generate'" :class="{ active: mode === 'generate' }" @click="setMode('generate')">
+          <span>✦</span>文生图
+        </button>
+        <button type="button" role="tab" :aria-selected="mode === 'reference'" :class="{ active: mode === 'reference' }" @click="setMode('reference')" :disabled="capabilities && !capabilities.multi_image_reference">
+          <span>▧</span>参考合成
+        </button>
+        <button type="button" role="tab" :aria-selected="mode === 'edit_mask'" :class="{ active: mode === 'edit_mask' }" @click="setMode('edit_mask')" :disabled="capabilities && !capabilities.mask_edit">
+          <span>◐</span>局部编辑
+        </button>
+      </div>
+
+      <div class="studio-scroll">
+        <section class="panel-section" x-show="mode !== 'generate'">
+          <div class="section-title">
+            <div><strong x-text="mode === 'edit_mask' ? '主图与参考图' : '参考图片'"></strong><small x-text="inputHint"></small></div>
+            <span x-text="`${inputAssets.length}/${maxInputImages}`"></span>
+          </div>
+
+          <div class="asset-grid" x-show="inputAssets.length">
+            <template x-for="(asset, index) in inputAssets" :key="asset.id">
+              <article class="asset-tile" draggable="true" @dragstart="dragAssetIndex = index" @dragover.prevent @drop.prevent="dropAsset(index)" :class="{ primary: index === 0 }">
+                <img :src="asset.content_url" :alt="asset.original_filename || `参考图 ${index + 1}`" />
+                <span x-show="index === 0" x-text="mode === 'edit_mask' ? '被编辑主图' : '主参考'"></span>
+                <button type="button" @click="removeInputAsset(index)" aria-label="删除参考图">×</button>
+                <div class="asset-order">
+                  <button type="button" @click="moveAsset(index, -1)" :disabled="index === 0" aria-label="前移">‹</button>
+                  <b x-text="index + 1"></b>
+                  <button type="button" @click="moveAsset(index, 1)" :disabled="index === inputAssets.length - 1" aria-label="后移">›</button>
+                </div>
+              </article>
+            </template>
+          </div>
+
+          <label class="upload-zone" :class="{ busy: uploadingInputs }">
+            <input type="file" multiple accept="image/png,image/jpeg,image/webp" @change="uploadInputFiles($event)" :disabled="uploadingInputs || inputAssets.length >= maxInputImages" />
+            <span class="upload-icon">＋</span>
+            <strong x-text="uploadingInputs ? '正在处理图片…' : '添加参考图片'"></strong>
+            <small>PNG、JPEG 或 WebP，可多选并拖动排序</small>
+          </label>
+
+          <div class="mask-block" x-show="mode === 'edit_mask'">
+            <div class="section-title compact">
+              <div><strong>区域蒙版</strong><small>透明区域指示需要修改的位置</small></div>
+            </div>
+            <template x-if="maskAsset">
+              <div class="mask-preview">
+                <img :src="maskAsset.content_url" alt="编辑蒙版" />
+                <div><strong x-text="maskAsset.original_filename || '蒙版'"></strong><small x-text="`${maskAsset.width} × ${maskAsset.height} · 含 Alpha`"></small></div>
+                <button class="icon-btn small" type="button" @click="removeMask()" aria-label="移除蒙版">×</button>
+              </div>
+            </template>
+            <div class="mask-actions">
+              <button class="button dark" type="button" @click="openMaskCanvas()" :disabled="uploadingMask || !inputAssets.length">画笔绘制蒙版</button>
+              <label class="button subtle file-button">
+                上传 PNG
+                <input type="file" accept="image/png" @change="uploadMaskFile($event)" :disabled="uploadingMask || !inputAssets.length" />
+              </label>
+            </div>
+            <small class="mask-action-hint" x-text="inputAssets.length ? '红色涂抹区会被替换；也可上传同尺寸透明 PNG' : '请先添加主图'"></small>
+            <p class="field-help">蒙版用于引导模型，实际编辑边界可能不会完全贴合。</p>
+          </div>
+        </section>
+
+        <section class="panel-section prompt-section">
+          <div class="section-title">
+            <div><strong x-text="mode === 'generate' ? '描述你的画面' : '描述如何修改'"></strong><small>清晰说明主体、风格、构图和光线</small></div>
+            <span x-text="`${prompt.length} 字`"></span>
+          </div>
+          <div class="prompt-box" :class="{ focused: promptFocused }">
+            <textarea x-model="prompt" @focus="promptFocused = true" @blur="promptFocused = false" @keydown.ctrl.enter.prevent="submitGeneration()" @keydown.meta.enter.prevent="submitGeneration()" rows="7" :placeholder="promptPlaceholder"></textarea>
+            <div class="prompt-tools">
+              <button type="button" @click="clearPrompt()" :disabled="!prompt">清空</button>
+              <button type="button" @click="copyPrompt()" :disabled="!prompt">复制</button>
+            </div>
+          </div>
+          <div class="style-chips">
+            <button type="button" @click="appendPrompt('电影感光影')">电影感</button>
+            <button type="button" @click="appendPrompt('高细节写实摄影')">写实</button>
+            <button type="button" @click="appendPrompt('极简平面设计')">极简</button>
+            <button type="button" @click="appendPrompt('柔和自然光')">自然光</button>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <button class="advanced-toggle" type="button" @click="advancedOpen = !advancedOpen" :aria-expanded="advancedOpen">
+            <span><b>生成参数</b><small x-text="`${sizeLabel} · ${quality} · ${n} 张`"></small></span>
+            <i :class="{ open: advancedOpen }">⌄</i>
+          </button>
+
+          <div class="advanced-grid" x-show="advancedOpen" x-transition.opacity>
+            <label class="field">
+              <span>画面尺寸</span>
+              <select x-model="sizePreset" @change="syncSizePreset()">
+                <option value="auto">自动选择</option>
+                <option value="1024x1024">1024 × 1024 · 方形</option>
+                <option value="1536x1024">1536 × 1024 · 横向</option>
+                <option value="1024x1536">1024 × 1536 · 纵向</option>
+                <option value="2048x2048">2048 × 2048 · 2K 方形</option>
+                <option value="2048x1152">2048 × 1152 · 2K 横向</option>
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+            <div class="custom-size" x-show="sizePreset === 'custom'">
+              <label class="field"><span>宽度</span><input type="number" min="16" max="3840" step="16" x-model.number="customWidth" /></label>
+              <span>×</span>
+              <label class="field"><span>高度</span><input type="number" min="16" max="3840" step="16" x-model.number="customHeight" /></label>
+            </div>
+            <label class="field">
+              <span>质量</span>
+              <select x-model="quality">
+                <template x-for="item in qualityOptions" :key="item"><option :value="item" x-text="qualityLabel(item)"></option></template>
+              </select>
+            </label>
+            <label class="field">
+              <span>输出数量</span>
+              <select x-model.number="n">
+                <template x-for="count in nOptions" :key="count"><option :value="count" x-text="`${count} 张`"></option></template>
+              </select>
+            </label>
+            <label class="field">
+              <span>文件格式</span>
+              <select x-model="outputFormat">
+                <template x-for="item in formatOptions" :key="item"><option :value="item" x-text="item.toUpperCase()"></option></template>
+              </select>
+            </label>
+            <label class="field" x-show="outputFormat === 'jpeg' || outputFormat === 'webp'">
+              <span>压缩质量 <b x-text="outputCompression"></b></span>
+              <input class="range" type="range" min="0" max="100" step="5" x-model.number="outputCompression" />
+            </label>
+            <label class="field" x-show="backgroundOptions.length">
+              <span>背景</span>
+              <select x-model="background">
+                <option value="">使用默认</option>
+                <template x-for="item in backgroundOptions" :key="item"><option :value="item" x-text="backgroundLabel(item)"></option></template>
+              </select>
+            </label>
+            <label class="field">
+              <span>内容审核</span>
+              <select x-model="moderation">
+                <template x-for="item in moderationOptions" :key="item"><option :value="item" x-text="item === 'auto' ? '标准' : '较宽松'"></option></template>
+              </select>
+            </label>
+            <label class="field" x-show="capabilities?.supports_partial_images">
+              <span>渐进预览</span>
+              <select x-model.number="partialImages">
+                <option :value="0">关闭</option>
+                <template x-for="count in partialImageOptions" :key="count">
+                  <option :value="count" x-text="`${count} 张预览`"></option>
+                </template>
+              </select>
+              <small>更早看到构图；每张预览会增加图像输出 Token</small>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="generate-footer">
+        <div class="validation-message" x-show="validationMessage">
+          <span>!</span><p x-text="validationMessage"></p>
+        </div>
+        <button class="generate-button" type="button" @click="submitGeneration()" :disabled="!canSubmit">
+          <span x-text="taskBusy ? '任务进行中' : '生成图像'"></span>
+          <kbd>⌘ ↵</kbd>
+        </button>
+        <p>结果会保存在本地 · 参考图越多可能消耗更多输入 Token</p>
+      </div>
+    </aside>
   </div>
 
-  <!-- Settings drawer -->
-  <div class="overlay" x-show="showSettings" x-transition.opacity @click="showSettings = false"></div>
-  <aside class="settings-panel" x-show="showSettings" x-transition:enter="slide-in" @click.outside="showSettings = false">
-    <div class="settings-head">
-      <h2>设置</h2>
-      <button type="button" class="btn ghost" @click="showSettings = false">关闭</button>
-    </div>
-    <form class="settings-form" @submit.prevent="saveSettings()">
-      <label>Base URL
-        <input x-model="settings.base_url" placeholder="例如 https://your-gateway.example/ 或 http://host:port" required />
-      </label>
-      <label>API Key
-        <input x-model="settings.api_key" type="password" :placeholder="settings.api_key_set ? (settings.api_key_masked + '（留空则不修改）') : '填写你自己的 token'" />
-      </label>
-      <label>默认模型
-        <input x-model="settings.default_model" placeholder="例如 gpt-image-2" required />
-      </label>
-      <label>默认尺寸
-        <input x-model="settings.default_size" />
-      </label>
-      <label>默认质量
-        <select x-model="settings.default_quality">
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-          <option value="auto">auto</option>
-        </select>
-      </label>
-      <label>默认数量 n
-        <input type="number" min="1" max="4" x-model.number="settings.default_n" />
-      </label>
-      <label>模型过滤关键词（逗号分隔）
-        <input x-model="filterKeywordsText" placeholder="image,dall-e,gpt-image" />
-      </label>
-      <p class="settings-note">API Key 保存在本地 <code>config/secrets.json</code>，其它配置在 <code>config/settings.json</code>，均不会上传到 git。每人自行填写自己的 Key。</p>
-      <div class="settings-actions">
-        <button type="submit" class="btn primary">保存</button>
-        <span class="save-msg" x-text="settingsMsg"></span>
+  <div class="modal-backdrop mask-editor-backdrop" x-show="showMaskEditor" x-transition.opacity @click.self="showMaskEditor = false">
+    <section class="mask-editor-modal" role="dialog" aria-modal="true" aria-labelledby="mask-editor-title" x-show="showMaskEditor" x-transition>
+      <header>
+        <div><p class="eyebrow">LOCAL MASK EDITOR</p><h2 id="mask-editor-title">绘制需要替换的区域</h2></div>
+        <button class="icon-btn" type="button" @click="showMaskEditor = false" aria-label="关闭蒙版编辑器">×</button>
+      </header>
+      <div class="mask-editor-body">
+        <div class="mask-toolbar">
+          <div class="tool-segment" role="group" aria-label="蒙版工具">
+            <button type="button" :class="{ active: maskTool === 'paint' }" @click="maskTool = 'paint'">画笔</button>
+            <button type="button" :class="{ active: maskTool === 'erase' }" @click="maskTool = 'erase'">橡皮擦</button>
+          </div>
+          <label><span>笔刷 <b x-text="`${maskBrushSize}px`"></b></span><input type="range" min="8" max="320" step="4" x-model.number="maskBrushSize" /></label>
+          <div class="mask-tool-actions">
+            <button class="button subtle" type="button" @click="undoMask()" :disabled="maskUndoStack.length <= 1">撤销</button>
+            <button class="button subtle" type="button" @click="redoMask()" :disabled="!maskRedoStack.length">重做</button>
+            <button class="button subtle" type="button" @click="invertMaskCanvas()">反选</button>
+            <button class="button text-danger" type="button" @click="clearMaskCanvas()">清空</button>
+          </div>
+        </div>
+        <div class="mask-canvas-shell">
+          <img :src="inputAssets[0]?.content_url" alt="蒙版主图" draggable="false" />
+          <canvas id="mask-paint-canvas"
+            @pointerdown.prevent="beginMaskStroke($event)"
+            @pointermove.prevent="drawMaskStroke($event)"
+            @pointerup.prevent="endMaskStroke($event)"
+            @pointercancel.prevent="endMaskStroke($event)"
+            @pointerleave="maskDrawing && endMaskStroke($event)"></canvas>
+        </div>
+        <p class="mask-editor-help"><span></span>红色区域会导出为透明区域，也是模型重点修改的位置。画布只在浏览器本地处理。</p>
       </div>
-    </form>
-  </aside>
+      <footer>
+        <span x-text="inputAssets[0] ? `${inputAssets[0].width} × ${inputAssets[0].height}` : ''"></span>
+        <button class="button subtle" type="button" @click="showMaskEditor = false">取消</button>
+        <button class="button dark" type="button" @click="saveMaskCanvas()" :disabled="uploadingMask" x-text="uploadingMask ? '正在保存…' : '使用此蒙版'"></button>
+      </footer>
+    </section>
+  </div>
 
-  <div class="lightbox" x-show="lightbox" @click="lightbox = null" x-transition>
-    <img :src="lightbox" alt="preview" />
+  <div class="modal-backdrop conversation-backdrop" x-show="showConversation" x-transition.opacity @click.self="showConversation = false">
+    <section class="conversation-modal" role="dialog" aria-modal="true" aria-labelledby="conversation-title" x-show="showConversation" x-transition>
+      <header>
+        <div>
+          <p class="eyebrow">RESPONSES IMAGE WORKFLOW</p>
+          <h2 id="conversation-title" x-text="conversation?.title || '开始对话式图像编辑'"></h2>
+          <small x-text="conversation ? `${conversation.responses_model} · ${conversation.turns.length} 轮` : activeProvider?.responses_model"></small>
+        </div>
+        <button class="icon-btn" type="button" @click="showConversation = false" aria-label="关闭多轮编辑">×</button>
+      </header>
+      <div class="conversation-scroll">
+        <div class="conversation-cost-note">
+          <span>i</span>
+          <p><b>独立计费链路</b>每轮同时产生 Responses 主模型 Token 与图像生成费用；历史上下文 Token 也会计入输入。</p>
+        </div>
+        <template x-if="!conversation">
+          <article class="conversation-source">
+            <img :src="conversationSourceJob?.output_urls?.[0]" alt="多轮编辑来源图" />
+            <div><small>来源图片</small><strong x-text="conversationSourceJob?.request_snapshot?.prompt || '历史生成结果'"></strong></div>
+          </article>
+        </template>
+        <div class="conversation-turns" x-show="conversation?.turns?.length">
+          <template x-for="(turn, index) in (conversation?.turns || [])" :key="turn.id">
+            <article class="conversation-turn">
+              <div class="conversation-user">
+                <span x-text="index + 1"></span>
+                <p x-text="turn.prompt"></p>
+              </div>
+              <div class="conversation-result">
+                <img :src="turn.output_urls?.[0]" :alt="`第 ${index + 1} 轮编辑结果`" />
+                <div>
+                  <small x-text="turn.revised_prompt ? '模型优化后的提示词' : '本轮完成'"></small>
+                  <p x-text="turn.revised_prompt || '图像编辑结果已保存到本地历史。'"></p>
+                  <b x-text="conversationUsage(turn)"></b>
+                </div>
+              </div>
+            </article>
+          </template>
+        </div>
+        <div class="inline-error" x-show="conversationError">
+          <span>!</span><div><strong>无法继续会话</strong><p x-text="conversationError"></p></div>
+          <button class="icon-btn" type="button" @click="conversationError = ''">×</button>
+        </div>
+      </div>
+      <footer>
+        <textarea x-model="conversationPrompt" rows="2" maxlength="4000"
+          @keydown.ctrl.enter.prevent="submitConversationTurn()"
+          @keydown.meta.enter.prevent="submitConversationTurn()"
+          placeholder="例如：保持人物和构图，把背景改成雨夜霓虹街道…"></textarea>
+        <button class="button dark" type="button" @click="submitConversationTurn()"
+          :disabled="conversationBusy || !conversationPrompt.trim() || conversationError"
+          x-text="conversationBusy ? '正在编辑…' : (conversation ? '继续修改' : '开始第一轮')"></button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" x-show="showProviderSettings" x-transition.opacity @click.self="showProviderSettings = false">
+    <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" x-show="showProviderSettings" x-transition>
+      <header>
+        <div><p class="eyebrow">CONNECTIONS</p><h2 id="settings-title">连接与 Provider</h2></div>
+        <button class="icon-btn" type="button" @click="showProviderSettings = false" aria-label="关闭设置">×</button>
+      </header>
+      <div class="settings-layout">
+        <aside class="provider-list">
+          <template x-for="provider in providers" :key="provider.id">
+            <button type="button" :class="{ active: providerDraft.id === provider.id }" @click="editProvider(provider)">
+              <i :class="{ ready: provider.enabled }"></i>
+              <span><strong x-text="provider.name"></strong><small x-text="provider.default_model || '未设置模型'"></small></span>
+              <b x-show="provider.is_active">当前</b>
+            </button>
+          </template>
+          <button class="add-provider" type="button" @click="newProviderDraft()">＋ 新建连接</button>
+        </aside>
+        <form class="provider-form" @submit.prevent="saveProvider()">
+          <div class="form-grid">
+            <label class="field"><span>连接名称</span><input x-model="providerDraft.name" required placeholder="例如：公司生产环境" /></label>
+            <label class="field"><span>Provider 类型</span>
+              <select x-model="providerDraft.provider_type">
+                <option value="openai_images">OpenAI Images</option>
+                <option value="openai_compatible_images">OpenAI-compatible</option>
+              </select>
+            </label>
+            <label class="field full"><span>Base URL</span><input x-model="providerDraft.base_url" required placeholder="https://api.example.com" /></label>
+            <label class="field"><span>认证方式</span>
+              <select x-model="providerDraft.auth_type">
+                <option value="static_bearer">静态 Bearer Token</option>
+                <option value="token_distributor">Token 分发系统</option>
+              </select>
+            </label>
+            <label class="field"><span>默认模型</span><input x-model="providerDraft.default_model" placeholder="gpt-image-2" /></label>
+            <label class="field full responses-config">
+              <span>Responses API 多轮编辑</span>
+              <span class="inline-switch"><input type="checkbox" x-model="providerDraft.responses_enabled" />启用独立的对话式编辑能力</span>
+              <small>仅当该网关实现 `/v1/responses` 和 image_generation 工具时启用。</small>
+            </label>
+            <label class="field full" x-show="providerDraft.responses_enabled">
+              <span>Responses 主模型</span>
+              <input x-model="providerDraft.responses_model" placeholder="填写支持 image_generation 工具的主模型" />
+              <small>主模型文本 Token 会在图像生成费用之外另行计费。</small>
+            </label>
+            <label class="field full" x-show="providerDraft.auth_type === 'static_bearer'"><span>API Key</span><input x-model="providerDraft.api_key" type="password" :placeholder="providerDraft.api_key_set ? '已设置，留空不修改' : '输入 Token'" /></label>
+            <template x-if="providerDraft.auth_type === 'token_distributor'">
+              <div class="distributor-fields full">
+                <label class="field full"><span>分发系统 Base URL</span><input x-model="providerDraft.token_distributor.base_url" placeholder="https://token.example.com" /></label>
+                <label class="field"><span>Token Path</span><input x-model="providerDraft.token_distributor.path" placeholder="/token" /></label>
+                <label class="field"><span>HTTP Method</span><select x-model="providerDraft.token_distributor.method"><option>POST</option><option>GET</option></select></label>
+                <label class="field"><span>Client ID</span><input x-model="providerDraft.distributor_client_id" :placeholder="providerDraft.distributor_client_id_set ? '已设置，留空不修改' : ''" /></label>
+                <label class="field"><span>Client Secret</span><input type="password" x-model="providerDraft.distributor_client_secret" :placeholder="providerDraft.distributor_client_secret_set ? '已设置，留空不修改' : ''" /></label>
+                <label class="field"><span>Token 字段路径</span><input x-model="providerDraft.token_distributor.token_path" /></label>
+                <label class="field"><span>expires_in 字段</span><input x-model="providerDraft.token_distributor.expires_in_path" /></label>
+              </div>
+            </template>
+          </div>
+          <div class="switch-row">
+            <label><input type="checkbox" x-model="providerDraft.enabled" /><span>启用此连接</span></label>
+            <label><input type="checkbox" x-model="providerDraft.verify_tls" /><span>验证 TLS 证书</span></label>
+          </div>
+          <div class="test-result" x-show="connectionTest">
+            <template x-for="stage in connectionTest?.stages || []" :key="stage.name">
+              <span :class="{ ok: stage.ok, fail: !stage.ok }"><i x-text="stage.ok ? '✓' : '×'"></i><b x-text="stage.name"></b><small x-text="stage.message"></small></span>
+            </template>
+          </div>
+          <p class="form-message" :class="{ error: providerMessageType === 'error' }" x-text="providerMessage"></p>
+          <footer>
+            <button class="button text-danger" type="button" x-show="providerDraft.id && providers.length > 1" @click="deleteProvider()">删除</button>
+            <span></span>
+            <button class="button subtle" type="button" x-show="providerDraft.id" @click="testProvider()" :disabled="testingProvider" x-text="testingProvider ? '测试中…' : '测试连接'"></button>
+            <button class="button dark" type="submit" :disabled="savingProvider" x-text="savingProvider ? '保存中…' : '保存连接'"></button>
+          </footer>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div class="lightbox" x-show="lightboxUrl" x-transition.opacity @click.self="lightboxUrl = ''" role="dialog" aria-modal="true">
+    <button class="lightbox-close" type="button" @click="lightboxUrl = ''" aria-label="关闭大图">×</button>
+    <img :src="lightboxUrl" alt="生成结果大图" />
+    <div>
+      <span x-text="`结果 ${lightboxIndex + 1} / ${previewUrls.length}`"></span>
+      <a class="button light" :href="lightboxUrl" download>下载原图</a>
+      <button class="button light" type="button" @click="continueFromResult(lightboxUrl); lightboxUrl = ''">继续编辑</button>
+    </div>
+  </div>
+
+  <div class="toast-stack" aria-live="polite">
+    <template x-for="toast in toasts" :key="toast.id">
+      <div class="toast" :class="toast.type" x-transition>
+        <span x-text="toast.type === 'error' ? '!' : '✓'"></span>
+        <p x-text="toast.message"></p>
+      </div>
+    </template>
   </div>
 
   <script src="/static/js/app.js"></script>

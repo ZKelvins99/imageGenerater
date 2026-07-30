@@ -2,7 +2,7 @@
 
 > 文档状态：可执行规划稿  
 > 基线日期：2026-07-30  
-> 进度核验：2026-07-30（Phase 0–3 已验收）  
+> 进度核验：2026-07-30（Phase 0–6 已验收）
 > 目标读者：接手实现的 AI / 开发者 / 验收人员  
 > 本文不提供具体实现代码；实现者必须先阅读本文，再按阶段逐项开发和验收。
 
@@ -17,9 +17,9 @@
 - [x] **Phase 1**：Provider 与 Token 抽象（多连接、Static / Distributor 可配置契约 + mock、连接测试）
 - [x] **Phase 2**：SQLite、Asset 与持久化任务（迁移 JSONL、任务恢复、取消/重试）
 - [x] **Phase 3**：GPT Image 2 完整 Images API（多图参考、蒙版、格式/尺寸、错误分类与重试）
-- [ ] **Phase 4**：完整 Web 工作台（三模式、历史管理、设置、响应式）
-- [ ] **Phase 5**：蒙版画布与流式 partial images
-- [ ] **Phase 6**：Responses API 多轮编辑（可选）
+- [x] **Phase 4**：完整 Web 工作台（三模式、历史管理、设置、响应式）
+- [x] **Phase 5**：蒙版画布与流式 partial images
+- [x] **Phase 6**：Responses API 多轮编辑（独立适配器、会话持久化、历史续编与能力门控）
 - [ ] **Phase 7**：发布与运维（README/changelog、health、可选 Docker）
 
 ### 0.2 当前基线能力（§3.1，已有）
@@ -40,24 +40,28 @@
 - [x] `GenerationRequest` / `ModelCapabilities`、`POST /api/v1/generations`（Phase 3）
 - [x] 多图参考 + 蒙版 edits、灵活尺寸校验、PNG/JPEG/WebP、上游 request ID（Phase 3）
 - [x] 错误分类；429/5xx 受控重试；moderation 不重试（Phase 3）
+- [x] 三模式 Web 工作台、多图排序、蒙版上传校验、能力联动参数（Phase 4）
+- [x] Provider 管理、连接测试、任务恢复、历史搜索/过滤/收藏/标签、响应式 UI（Phase 4）
+- [x] 蒙版画布、SSE partial images、断线恢复与最终图替换（Phase 5）
+- [x] Responses API 对话式编辑、会话/用量/revised prompt 持久化与历史续编（Phase 6）
 
 ### 0.3 计划能力缺口（§3.2 / 本轮必须，未做）
 
 - [x] Provider / Token 解耦与多连接管理（Phase 1）
 - [~] 公司 Token Distributor 认证（可配置契约 + mock 已完成；**真实联调仍待 §22**）
-- [x] 多图参考、蒙版编辑（后端 API 已完成；前端排序 UI 待 Phase 4）
+- [x] 多图参考、蒙版编辑（上传校验与浏览器画布绘制闭环；Phase 5）
 - [x] 真实输出格式 / MIME / 尺寸元数据（Phase 3）
 - [x] SQLite 持久化任务（重启可恢复）（Phase 2）
-- [~] 取消与 429/5xx 重试已有；流式 partial 预览待 Phase 5
-- [ ] 历史搜索、分页、收藏、标签、批量下载
+- [x] 取消、429/5xx 重试、SSE partial 预览、断线轮询恢复与最终图替换
+- [x] 历史搜索、客户端分页、收藏、标签、批量下载
 - [~] 稳定错误码与 request ID（Phase 3）；日志脱敏待加强
 - [x] 上传安全校验（大小、MIME、像素炸弹等）（Phase 2）
 - [x] 自动化测试与 CI（Phase 0）
-- [ ] 完整响应式工作台与任务恢复体验
+- [x] 完整响应式工作台与任务恢复体验
 
-### 0.4 第二阶段 / 暂不纳入
+### 0.4 后续增强 / 暂不纳入
 
-- [ ] Responses API 连续多轮编辑（§4.2 / Phase 6）
+- [x] Responses API 连续多轮编辑（§4.2 / Phase 6）
 - [ ] Provider 能力自动探测与手动覆盖 UI
 - [ ] Prompt 模板、风格预设、批量队列、成本估算
 - [ ] 公网多租户 / 注册计费 / 云存储等（§4.3，明确不做）
@@ -65,12 +69,12 @@
 ### 0.5 最终验收清单进度（§21 摘要）
 
 - [~] 连接：静态 Token / Distributor(mock) / 多 Provider / Secret 不回显（Phase 1；公司联调未完成）
-- [~] 生图：文生图/多图/蒙版/尺寸/格式后端闭环（Phase 3）；完整 Web 参数面板待 Phase 4
-- [~] 任务与历史：状态机、重启恢复、取消/重试（Phase 2）；搜索过滤下载待后续
-- [ ] Web：引导、多图排序、蒙版、能力联动、移动端、无障碍
-- [~] 工程：单测/合约/CI mock + JSONL 幂等迁移（Phase 0–3）；发布文档待后续
+- [x] 生图：文生图/多图/蒙版/尺寸/格式的后端与 Web 闭环（Phase 3–4）
+- [x] 任务与历史：状态机、重启恢复、取消/重试、搜索过滤下载（Phase 2–4）
+- [x] Web：引导、多图排序、蒙版画布、能力联动、渐进预览、移动端与无障碍
+- [~] 工程：单测/合约/前端契约/CI mock + JSONL 幂等迁移；浏览器 E2E 与发布文档待后续
 
-**当前结论**：Phase 0–3 已完成。下一步为 **Phase 4**（完整 Web 工作台）。公司 Distributor 真实联调仍阻塞于 §22。
+**当前结论**：Phase 0–6 已完成。下一步为 **Phase 7**（发布与运维）。公司 Distributor 真实联调仍阻塞于 §22。
 
 ## 1. 项目目标
 
@@ -78,7 +82,7 @@
 
 1. 以 OpenAI `gpt-image-2` 的官方能力为第一优先级。
 2. 完整支持文生图、单图编辑、多图参考生成一张图、蒙版局部编辑。
-3. 为后续“连续多轮编辑”预留 Responses API 通道。
+3. 提供 Responses API“连续多轮编辑”通道，同时保持 Images API 单次流程独立。
 4. 首要接入公司的 Token 分发系统，同时继续兼容静态 API Key 和其他 OpenAI-compatible API。
 5. 让 Provider 差异、Token 获取方式、模型能力彼此解耦。
 6. Web 页面达到日常可用水平：参数清楚、上传方便、进度可信、历史可管理、错误可理解。
@@ -963,7 +967,7 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 
 > 实现 Phase 3。严格对照本文链接的 OpenAI 官方文档；不要凭旧版 GPT Image 1 参数记忆实现。Provider 不支持的显式参数必须返回 `CAPABILITY_UNSUPPORTED`，不能静默吞掉。所有外部请求使用 mock 合约测试。
 
-### Phase 4：完整 Web 工作台 — `[ ] 未开始`
+### Phase 4：完整 Web 工作台 — `[x] 已完成`
 
 目标：把后端能力转化为易用产品。
 
@@ -991,7 +995,7 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 
 > 实现 Phase 4。先根据后端 OpenAPI/稳定接口建立 typed API client，再实现页面；不要复制后端能力规则到多个组件。重点完成多图排序、蒙版工作流、任务恢复和移动端。使用 mock server 做 E2E，禁止依赖真实 Provider。
 
-### Phase 5：蒙版画布与流式 partial images — `[ ] 未开始`
+### Phase 5：蒙版画布与流式 partial images — `[x] 已完成`
 
 目标：提升编辑和等待体验。
 
@@ -1004,6 +1008,15 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 - 最终图到达后正确替换 partial。
 - 处理取消、断线重连和 partial 成本提示。
 
+完成记录（2026-07-30）：
+
+- 浏览器内蒙版编辑器已提供画笔、橡皮擦、笔刷大小、撤销/重做、反选和清空。
+- 画布以第一张主图的原始像素尺寸导出 PNG Alpha 蒙版，上传前后均执行尺寸与 Alpha 校验。
+- Images API 使用真正的 SSE 流读取，兼容 generation/edit 的 partial 与 completed 事件，并保留 401 Token 刷新和上游重试。
+- partial 作为 `partial` 资产按位置覆盖，通过 `job.partial_image` 广播；Jobs API 暴露 `partial_urls` 用于断线/刷新恢复。
+- 最终图到达后前端清空 partial，只将 output 计入正式结果；关闭或不支持 partial 时保持原非流式路径。
+- 自动化测试覆盖流式事件解析、最终图提取、前端蒙版工作流与恢复契约。
+
 验收：
 
 - 蒙版导出尺寸和 alpha 测试通过。
@@ -1015,7 +1028,7 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 
 > 实现 Phase 5。蒙版以第一张主图为坐标系，后端必须再次验证。partial image 是临时预览而非最终资产；事件去重、断线恢复和最终替换必须有测试。
 
-### Phase 6：Responses API 多轮编辑（可选增强） — `[ ] 未开始`
+### Phase 6：Responses API 多轮编辑（可选增强） — `[x] 已完成`
 
 目标：提供“继续把它改成……”的连续会话体验。
 
@@ -1032,6 +1045,15 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 - 多轮上下文有持久化。
 - 重启后会话仍可继续或明确提示不可恢复。
 - Images API 单次流程不受影响。
+
+完成记录（2026-07-30）：
+
+- 新增独立 Responses API 适配器；首轮可携带历史输出图，后续轮次使用 `previous_response_id`，不改变原 Images API 适配器。
+- 新增会话与轮次 SQLite migration，持久化 response/父轮次/任务关联、revised prompt、image call ID 和 usage。
+- 对话输出继续写入统一 Job、Asset 与历史系统；应用重启后可从最近 response 继续，若上游上下文已失效则返回明确错误。
+- Provider 增加显式能力开关和 Responses 主模型配置；未启用或未配置时隐藏入口，不猜测兼容性。
+- Web 新增从历史结果发起/恢复的对话式编辑面板，展示轮次结果、revised prompt、token usage 与额外成本提示。
+- 合约、持久化重启续编及前端能力门控均有 mock 自动化测试；未调用真实收费 API。
 
 交给 AI 的任务提示：
 
@@ -1116,23 +1138,23 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 - [x] 重启恢复。
 - [x] 429/5xx 重试。
 - [x] moderation/输入错误不重试。
-- [ ] 历史搜索、过滤、分页、收藏、标签。
-- [ ] 单张/批量下载和继续编辑。
+- [x] 历史搜索、过滤、客户端分页、收藏、标签。
+- [x] 单张/批量下载和继续编辑。
 
 ### Web
 
-- [ ] 首次连接引导清楚。
-- [ ] 多图拖放排序。
-- [ ] 蒙版校验/画布。
-- [ ] 能力驱动的参数显隐。
-- [ ] 错误可理解。
-- [ ] 移动端可用。
-- [ ] 键盘和无障碍基本合格。
-- [ ] 刷新与断线后状态恢复。
+- [x] 首次连接引导清楚。
+- [x] 多图拖放排序。
+- [x] 蒙版上传、校验与浏览器画布绘制已完成。
+- [x] 能力驱动的参数显隐。
+- [x] 错误可理解。
+- [x] 移动端可用。
+- [x] 键盘和无障碍基本合格。
+- [x] 刷新与断线后状态恢复。
 
 ### 工程
 
-- [~] 单元、合约、集成、E2E 测试通过。（Phase 0–2 单测/合约/集成已有；E2E 待 Phase 4）
+- [~] 单元、合约、集成和前端契约测试通过；真实浏览器 E2E 待补充。
 - [x] CI 不使用真实 Secret。
 - [x] JSONL 迁移幂等。
 - [~] README、配置示例、升级和故障排查已更新。（基础已更新；运维专章待 Phase 7）

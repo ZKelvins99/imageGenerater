@@ -88,6 +88,8 @@ def to_public(profile: ProviderProfile, *, is_active: bool = False) -> ProviderP
         timeout_seconds=profile.timeout_seconds,
         extra_headers=profile.extra_headers,
         capability_overrides=profile.capability_overrides,
+        responses_enabled=profile.responses_enabled,
+        responses_model=profile.responses_model,
         token_distributor=profile.token_distributor,
         deleted=profile.deleted,
         api_key_set=bool(secret.api_key),
@@ -118,6 +120,8 @@ def create_provider(body: ProviderCreate) -> ProviderPublic:
         timeout_seconds=body.timeout_seconds,
         extra_headers=body.extra_headers,
         capability_overrides=body.capability_overrides,
+        responses_enabled=body.responses_enabled,
+        responses_model=body.responses_model,
         token_distributor=body.token_distributor,
     )
     providers = list(settings.providers) + [profile]

@@ -109,6 +109,39 @@ async def request_with_401_retry(
         return await client.request(method, url, **kwargs)
 
 
+@asynccontextmanager
+async def stream_with_401_retry(
+    profile: ProviderProfile,
+    method: str,
+    url: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    token_transport: httpx.AsyncBaseTransport | None = None,
+    **kwargs: Any,
+) -> AsyncIterator[httpx.Response]:
+    """Open a streaming response; refresh the provider token once on 401."""
+    async with create_client(
+        profile,
+        transport=transport,
+        token_transport=token_transport,
+    ) as client:
+        async with client.stream(method, url, **kwargs) as resp:
+            if resp.status_code != 401:
+                yield resp
+                return
+            await resp.aread()
+
+    get_token_cache().invalidate(profile.id)
+    async with create_client(
+        profile,
+        force_refresh=True,
+        transport=transport,
+        token_transport=token_transport,
+    ) as client:
+        async with client.stream(method, url, **kwargs) as resp:
+            yield resp
+
+
 async def list_models_for_provider(
     profile: ProviderProfile,
     *,
@@ -159,6 +192,7 @@ __all__ = [
     "ProviderClientError",
     "create_client",
     "request_with_401_retry",
+    "stream_with_401_retry",
     "list_models_for_provider",
     "AccessToken",
     "TokenError",
