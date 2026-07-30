@@ -1,0 +1,13 @@
+{
+  "base_url": "https://example.test/v1",
+  "api_key_set": true,
+  "api_key_masked": "sk-t...5678",
+  "default_model": "gpt-image-2",
+  "default_size": "1024x1024",
+  "default_quality": "medium",
+  "default_n": 1,
+  "model_filter_keywords": ["image"],
+  "host": "127.0.0.1",
+  "port": 27183,
+  "active_provider_id": "default"
+}

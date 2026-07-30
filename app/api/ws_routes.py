@@ -51,9 +51,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # Keep alive; client may send ping
             msg = await websocket.receive_text()
             if msg == "ping":
-                await websocket.send_text(
-                    json.dumps({"type": "pong", "payload": {}})
-                )
+                await websocket.send_text(json.dumps({"type": "pong", "payload": {}}))
     except WebSocketDisconnect:
         await ws_manager.disconnect(websocket)
     except Exception:

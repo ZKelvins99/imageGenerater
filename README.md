@@ -39,6 +39,10 @@ python run.py
 - 参数：size / quality / n
 - 本地历史：`data/history.jsonl` + `data/outputs/` + `data/uploads/`
 - 任务进度：WebSocket `/ws`
+- 多 Provider：`/api/v1/providers`（CRUD、激活、连接测试、按 Provider 拉模型）
+- 认证：静态 Bearer，或可配置的公司 Token Distributor（需自行填写 endpoint/字段映射；**真实联调未完成**，见 `docs/IMPLEMENTATION_PLAN.md` §22）
+
+旧设置页 `/api/settings` 仍可用，会自动迁移为 `default` Provider。
 
 ## 目录
 
@@ -46,7 +50,23 @@ python run.py
 app/           # FastAPI 与业务模块
 config/        # example 进 git；settings.json / secrets.json 仅本地
 data/          # 历史与图片
+docs/          # 产品与实施计划
 static/        # 前端静态资源
 templates/     # 页面
+tests/         # 回归测试（mock，无真实网络）
 run.py         # 启动入口
 ```
+
+## 开发与测试
+
+```powershell
+uv pip install -r requirements-dev.txt
+.\.venv\Scripts\ruff.exe check app tests
+.\.venv\Scripts\ruff.exe format app tests
+.\.venv\Scripts\mypy.exe app
+.\.venv\Scripts\pytest.exe -q
+```
+
+CI 见 `.github/workflows/ci.yml`。测试全程使用 mock，不调用真实收费 API。
+
+进度见 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) §0（当前 Phase 0–2 已完成）。

@@ -4,8 +4,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.provider import ProviderProfile
+
 
 class AppSettings(BaseModel):
+    # Legacy flat fields — kept as a compatibility view of the active provider
     base_url: str = ""
     api_key: str = ""
     default_model: str = ""
@@ -15,6 +18,8 @@ class AppSettings(BaseModel):
     model_filter_keywords: list[str] = Field(default_factory=list)
     host: str = "127.0.0.1"
     port: int = 27183
+    providers: list[ProviderProfile] = Field(default_factory=list)
+    active_provider_id: str | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -27,6 +32,7 @@ class SettingsUpdate(BaseModel):
     model_filter_keywords: list[str] | None = None
     host: str | None = None
     port: int | None = None
+    active_provider_id: str | None = None
 
 
 class SettingsPublic(BaseModel):
@@ -42,6 +48,7 @@ class SettingsPublic(BaseModel):
     model_filter_keywords: list[str]
     host: str
     port: int
+    active_provider_id: str | None = None
 
 
 class GenerateRequest(BaseModel):

@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.services import history_service
+from app.services import history_service, task_service
 from app.services.history_service import output_url
-from app.services.task_service import task_manager
 
 router = APIRouter(prefix="/api", tags=["generate"])
 
 
 @router.get("/history")
 async def get_history(limit: int = 200) -> dict:
-    items = history_service.list_history(limit=limit)
+    items = await history_service.list_history_async(limit=limit)
     return {
         "items": [
             {
@@ -28,7 +27,7 @@ async def get_history(limit: int = 200) -> dict:
 
 @router.get("/history/{item_id}")
 async def get_history_item(item_id: str) -> dict:
-    item = history_service.get_history(item_id)
+    item = await history_service.get_history_async(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
     return {
@@ -42,7 +41,7 @@ async def get_history_item(item_id: str) -> dict:
 
 @router.delete("/history/{item_id}")
 async def delete_history_item(item_id: str) -> dict:
-    ok = history_service.delete_history(item_id)
+    ok = await history_service.delete_history_async(item_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Not found")
     return {"ok": True}
@@ -71,26 +70,33 @@ async def generate(
         upload_filename = image.filename
 
     try:
-        status = await task_manager.start_generate(
+        status = await task_service.task_manager.start_generate(
             mode=mode,
             prompt=prompt.strip(),
             model=model or None,
             size=size or None,
-            quality=quality or None,  # type: ignore[arg-type]
+            quality=quality or None,
             n=n,
             reference_path=reference_path or None,
             upload_bytes=upload_bytes,
             upload_filename=upload_filename,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        # Asset validation errors
+        from app.services.asset_service import AssetError
+
+        if isinstance(e, AssetError):
+            raise HTTPException(status_code=400, detail=e.message) from e
+        raise
 
     return status.model_dump()
 
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str) -> dict:
-    status = task_manager.get(task_id)
+    status = await task_service.task_manager.get_async(task_id)
     if not status:
         raise HTTPException(status_code=404, detail="Task not found")
     return status.model_dump()

@@ -37,6 +37,8 @@ function app() {
     activeTaskId: null,
     ws: null,
     wsState: "closed",
+    _wsHeartbeat: null,
+    _wsReconnectTimer: null,
     lightbox: null,
 
     async init() {
@@ -50,7 +52,33 @@ function app() {
       return ({ pending: "排队", running: "生成中", done: "完成", error: "失败" }[s] || s);
     },
 
+    _clearWsTimers() {
+      if (this._wsHeartbeat) {
+        clearInterval(this._wsHeartbeat);
+        this._wsHeartbeat = null;
+      }
+      if (this._wsReconnectTimer) {
+        clearTimeout(this._wsReconnectTimer);
+        this._wsReconnectTimer = null;
+      }
+    },
+
     connectWs() {
+      // Prevent stacked heartbeats / reconnect timers across reconnects.
+      this._clearWsTimers();
+      if (this.ws) {
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onmessage = null;
+        this.ws.onopen = null;
+        try {
+          this.ws.close();
+        } catch (_) {
+          /* ignore */
+        }
+        this.ws = null;
+      }
+
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const url = `${proto}://${location.host}/ws`;
       try {
@@ -64,7 +92,8 @@ function app() {
       };
       this.ws.onclose = () => {
         this.wsState = "closed";
-        setTimeout(() => this.connectWs(), 2000);
+        this._clearWsTimers();
+        this._wsReconnectTimer = setTimeout(() => this.connectWs(), 2000);
       };
       this.ws.onerror = () => {
         this.wsState = "error";
@@ -80,7 +109,7 @@ function app() {
           this.onTaskEvent(msg.payload);
         }
       };
-      setInterval(() => {
+      this._wsHeartbeat = setInterval(() => {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send("ping");
         }

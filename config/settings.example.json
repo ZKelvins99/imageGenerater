@@ -6,5 +6,7 @@
   "default_n": 1,
   "model_filter_keywords": [],
   "host": "127.0.0.1",
-  "port": 27183
+  "port": 27183,
+  "providers": [],
+  "active_provider_id": null
 }

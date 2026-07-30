@@ -15,6 +15,13 @@ data/outputs/*
 data/uploads/*
 !data/uploads/.gitkeep
 
+# Test / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
 # OS / IDE
 .DS_Store
 Thumbs.db

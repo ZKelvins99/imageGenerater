@@ -6,7 +6,9 @@ from typing import Any
 
 import httpx
 
-from app.services.config_service import load_settings
+from app.services import config_service, provider_client
+from app.services.provider_client import ProviderClientError, request_with_401_retry
+from app.services.provider_service import get_active_provider
 
 
 class ImageAPIError(Exception):
@@ -17,7 +19,12 @@ class ImageAPIError(Exception):
 
 
 def _client() -> httpx.AsyncClient:
-    settings = load_settings()
+    """Deprecated sync-style factory — prefer provider_client.create_client.
+
+    Kept for any residual callers; raises if used without active provider.
+    New code should use async create_client / request_with_401_retry.
+    """
+    settings = config_service.load_settings()
     base = (settings.base_url or "").rstrip("/")
     if not base:
         raise ImageAPIError("Base URL 未配置，请先在设置页填写")
@@ -35,24 +42,16 @@ def _client() -> httpx.AsyncClient:
 
 
 async def list_models(show_all: bool = False) -> list[dict[str, Any]]:
-    settings = load_settings()
-    async with _client() as client:
-        resp = await client.get("/v1/models")
-        if resp.status_code >= 400:
-            raise ImageAPIError(
-                _error_message(resp), status_code=resp.status_code
-            )
-        payload = resp.json()
-        data = payload.get("data") or []
-        if show_all:
-            return data
-        keywords = [k.lower() for k in settings.model_filter_keywords]
-        filtered = []
-        for m in data:
-            mid = str(m.get("id", "")).lower()
-            if any(k in mid for k in keywords):
-                filtered.append(m)
-        return filtered or data
+    try:
+        profile = get_active_provider()
+    except Exception as e:
+        raise ImageAPIError(str(e)) from e
+    try:
+        return await provider_client.list_models_for_provider(
+            profile, show_all=show_all
+        )
+    except ProviderClientError as e:
+        raise ImageAPIError(e.message, status_code=e.status_code) from e
 
 
 async def generate_text_to_image(
@@ -70,13 +69,16 @@ async def generate_text_to_image(
         "quality": quality,
         "n": n,
     }
-    async with _client() as client:
-        resp = await client.post("/v1/images/generations", json=body)
-        if resp.status_code >= 400:
-            raise ImageAPIError(
-                _error_message(resp), status_code=resp.status_code
-            )
-        return _extract_images(resp.json())
+    try:
+        profile = get_active_provider()
+        resp = await request_with_401_retry(
+            profile, "POST", "/v1/images/generations", json=body
+        )
+    except ProviderClientError as e:
+        raise ImageAPIError(e.message, status_code=e.status_code) from e
+    if resp.status_code >= 400:
+        raise ImageAPIError(_error_message(resp), status_code=resp.status_code)
+    return _extract_images(resp.json())
 
 
 async def generate_image_to_image(
@@ -99,13 +101,16 @@ async def generate_image_to_image(
     }
     file_bytes = image_path.read_bytes()
     files = {"image": (image_path.name, file_bytes, mime)}
-    async with _client() as client:
-        resp = await client.post("/v1/images/edits", data=data, files=files)
-        if resp.status_code >= 400:
-            raise ImageAPIError(
-                _error_message(resp), status_code=resp.status_code
-            )
-        return _extract_images(resp.json())
+    try:
+        profile = get_active_provider()
+        resp = await request_with_401_retry(
+            profile, "POST", "/v1/images/edits", data=data, files=files
+        )
+    except ProviderClientError as e:
+        raise ImageAPIError(e.message, status_code=e.status_code) from e
+    if resp.status_code >= 400:
+        raise ImageAPIError(_error_message(resp), status_code=resp.status_code)
+    return _extract_images(resp.json())
 
 
 def _extract_images(payload: dict[str, Any]) -> list[bytes]:
