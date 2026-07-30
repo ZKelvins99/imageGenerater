@@ -1,29 +1,47 @@
 from __future__ import annotations
 
-import base64
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from app.services import config_service, provider_client
-from app.services.provider_client import ProviderClientError, request_with_401_retry
+from app.services import config_service, images_adapter, provider_client
+from app.services.errors import AppError
+from app.services.provider_client import ProviderClientError
 from app.services.provider_service import get_active_provider
 
 
 class ImageAPIError(Exception):
-    def __init__(self, message: str, status_code: int | None = None):
+    """Legacy error type kept for Phase 0–2 callers."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        code: str | None = None,
+        retryable: bool = False,
+        request_id: str | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.message = message
+        self.code = code or "UPSTREAM_ERROR"
+        self.retryable = retryable
+        self.request_id = request_id
+
+    @classmethod
+    def from_app_error(cls, err: AppError) -> ImageAPIError:
+        return cls(
+            err.message,
+            err.status_code,
+            code=err.code,
+            retryable=err.retryable,
+            request_id=err.request_id,
+        )
 
 
 def _client() -> httpx.AsyncClient:
-    """Deprecated sync-style factory — prefer provider_client.create_client.
-
-    Kept for any residual callers; raises if used without active provider.
-    New code should use async create_client / request_with_401_retry.
-    """
     settings = config_service.load_settings()
     base = (settings.base_url or "").rstrip("/")
     if not base:
@@ -62,23 +80,16 @@ async def generate_text_to_image(
     quality: str,
     n: int,
 ) -> list[bytes]:
-    body = {
-        "model": model,
-        "prompt": prompt,
-        "size": size,
-        "quality": quality,
-        "n": n,
-    }
     try:
-        profile = get_active_provider()
-        resp = await request_with_401_retry(
-            profile, "POST", "/v1/images/generations", json=body
+        return await images_adapter.generate_text_to_image_legacy(
+            prompt=prompt,
+            model=model,
+            size=size,
+            quality=quality,
+            n=n,
         )
-    except ProviderClientError as e:
-        raise ImageAPIError(e.message, status_code=e.status_code) from e
-    if resp.status_code >= 400:
-        raise ImageAPIError(_error_message(resp), status_code=resp.status_code)
-    return _extract_images(resp.json())
+    except AppError as e:
+        raise ImageAPIError.from_app_error(e) from e
 
 
 async def generate_image_to_image(
@@ -90,70 +101,18 @@ async def generate_image_to_image(
     n: int,
     image_path: Path,
 ) -> list[bytes]:
-    """Call /v1/images/edits with one reference image (multipart)."""
-    mime = _guess_mime(image_path)
-    data = {
-        "model": model,
-        "prompt": prompt,
-        "size": size,
-        "quality": quality,
-        "n": str(n),
-    }
-    file_bytes = image_path.read_bytes()
-    files = {"image": (image_path.name, file_bytes, mime)}
     try:
-        profile = get_active_provider()
-        resp = await request_with_401_retry(
-            profile, "POST", "/v1/images/edits", data=data, files=files
+        return await images_adapter.generate_image_to_image_legacy(
+            prompt=prompt,
+            model=model,
+            size=size,
+            quality=quality,
+            n=n,
+            image_path=image_path,
         )
-    except ProviderClientError as e:
-        raise ImageAPIError(e.message, status_code=e.status_code) from e
-    if resp.status_code >= 400:
-        raise ImageAPIError(_error_message(resp), status_code=resp.status_code)
-    return _extract_images(resp.json())
+    except AppError as e:
+        raise ImageAPIError.from_app_error(e) from e
 
 
-def _extract_images(payload: dict[str, Any]) -> list[bytes]:
-    items = payload.get("data") or []
-    if not items:
-        raise ImageAPIError("API returned no image data")
-    out: list[bytes] = []
-    for item in items:
-        b64 = item.get("b64_json")
-        if b64:
-            out.append(base64.b64decode(b64))
-            continue
-        url = item.get("url")
-        if url:
-            # Rare for this gateway; fetch if present
-            with httpx.Client(timeout=120.0, trust_env=False) as sync:
-                r = sync.get(url)
-                r.raise_for_status()
-                out.append(r.content)
-            continue
-        raise ImageAPIError("Image item missing b64_json and url")
-    return out
-
-
-def _error_message(resp: httpx.Response) -> str:
-    try:
-        data = resp.json()
-        err = data.get("error")
-        if isinstance(err, dict):
-            return str(err.get("message") or err)
-        if isinstance(err, str):
-            return err
-        return resp.text[:500] or f"HTTP {resp.status_code}"
-    except Exception:
-        return resp.text[:500] or f"HTTP {resp.status_code}"
-
-
-def _guess_mime(path: Path) -> str:
-    suffix = path.suffix.lower()
-    return {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-        ".gif": "image/gif",
-    }.get(suffix, "application/octet-stream")
+# Re-export request helper for tests that monkeypatch it
+request_with_401_retry = provider_client.request_with_401_retry

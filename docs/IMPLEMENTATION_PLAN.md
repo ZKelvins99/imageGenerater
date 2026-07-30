@@ -2,7 +2,7 @@
 
 > 文档状态：可执行规划稿  
 > 基线日期：2026-07-30  
-> 进度核验：2026-07-30（Phase 0–2 已验收）  
+> 进度核验：2026-07-30（Phase 0–3 已验收）  
 > 目标读者：接手实现的 AI / 开发者 / 验收人员  
 > 本文不提供具体实现代码；实现者必须先阅读本文，再按阶段逐项开发和验收。
 
@@ -16,7 +16,7 @@
 - [x] **Phase 0**：基线与工程质量（测试目录、lint/format、CI、WS heartbeat 修复）
 - [x] **Phase 1**：Provider 与 Token 抽象（多连接、Static / Distributor 可配置契约 + mock、连接测试）
 - [x] **Phase 2**：SQLite、Asset 与持久化任务（迁移 JSONL、任务恢复、取消/重试）
-- [ ] **Phase 3**：GPT Image 2 完整 Images API（多图参考、蒙版、格式/尺寸、错误分类）
+- [x] **Phase 3**：GPT Image 2 完整 Images API（多图参考、蒙版、格式/尺寸、错误分类与重试）
 - [ ] **Phase 4**：完整 Web 工作台（三模式、历史管理、设置、响应式）
 - [ ] **Phase 5**：蒙版画布与流式 partial images
 - [ ] **Phase 6**：Responses API 多轮编辑（可选）
@@ -37,17 +37,20 @@
 - [x] 旧 `/api/settings` 与 `/api/generate` 兼容；自动迁移为 default Provider
 - [x] SQLite + migration、Asset 上传校验/缩略图、持久化 Job 队列与重启恢复（Phase 2）
 - [x] `/api/v1/assets*`、`/api/v1/jobs*`（含 cancel / retry / delete）；JSONL 幂等迁移
+- [x] `GenerationRequest` / `ModelCapabilities`、`POST /api/v1/generations`（Phase 3）
+- [x] 多图参考 + 蒙版 edits、灵活尺寸校验、PNG/JPEG/WebP、上游 request ID（Phase 3）
+- [x] 错误分类；429/5xx 受控重试；moderation 不重试（Phase 3）
 
 ### 0.3 计划能力缺口（§3.2 / 本轮必须，未做）
 
 - [x] Provider / Token 解耦与多连接管理（Phase 1）
 - [~] 公司 Token Distributor 认证（可配置契约 + mock 已完成；**真实联调仍待 §22**）
-- [ ] 多图参考、排序、主图角色、蒙版编辑
-- [ ] 真实输出格式 / MIME / 尺寸元数据（当前固定 `.png` 写盘；Asset 已记录 MIME/尺寸）
+- [x] 多图参考、蒙版编辑（后端 API 已完成；前端排序 UI 待 Phase 4）
+- [x] 真实输出格式 / MIME / 尺寸元数据（Phase 3）
 - [x] SQLite 持久化任务（重启可恢复）（Phase 2）
-- [~] 取消已支持；真正的上游流式预览与受控 429 重试仍待 Phase 3/5
+- [~] 取消与 429/5xx 重试已有；流式 partial 预览待 Phase 5
 - [ ] 历史搜索、分页、收藏、标签、批量下载
-- [ ] 稳定错误码、request ID、日志脱敏
+- [~] 稳定错误码与 request ID（Phase 3）；日志脱敏待加强
 - [x] 上传安全校验（大小、MIME、像素炸弹等）（Phase 2）
 - [x] 自动化测试与 CI（Phase 0）
 - [ ] 完整响应式工作台与任务恢复体验
@@ -62,12 +65,12 @@
 ### 0.5 最终验收清单进度（§21 摘要）
 
 - [~] 连接：静态 Token / Distributor(mock) / 多 Provider / Secret 不回显（Phase 1；公司联调未完成）
-- [ ] 生图：文生图完整参数闭环、多图、蒙版、合法自定义尺寸
+- [~] 生图：文生图/多图/蒙版/尺寸/格式后端闭环（Phase 3）；完整 Web 参数面板待 Phase 4
 - [~] 任务与历史：状态机、重启恢复、取消/重试（Phase 2）；搜索过滤下载待后续
 - [ ] Web：引导、多图排序、蒙版、能力联动、移动端、无障碍
-- [~] 工程：单测/合约/CI mock + JSONL 幂等迁移（Phase 0–2）；发布文档待后续
+- [~] 工程：单测/合约/CI mock + JSONL 幂等迁移（Phase 0–3）；发布文档待后续
 
-**当前结论**：Phase 0–2 已完成。下一步为 **Phase 3**（GPT Image 2 完整 Images API）。公司 Distributor 真实联调仍阻塞于 §22。
+**当前结论**：Phase 0–3 已完成。下一步为 **Phase 4**（完整 Web 工作台）。公司 Distributor 真实联调仍阻塞于 §22。
 
 ## 1. 项目目标
 
@@ -932,7 +935,7 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 
 > 实现 Phase 2，只处理持久化、资产和任务状态，不添加多图 UI。使用 migration version，保留原 JSONL，不删除用户数据。提交前模拟应用重启并验证 queued/running 任务的恢复策略。
 
-### Phase 3：GPT Image 2 完整 Images API — `[ ] 未开始`
+### Phase 3：GPT Image 2 完整 Images API — `[x] 已完成`
 
 目标：后端完整表达官方单次生图能力。
 
@@ -1098,21 +1101,21 @@ CI 必须使用 mock，不需要公司 Token 或 OpenAI Key。
 
 ### 生图
 
-- [ ] 文生图。
-- [ ] 单图编辑。
-- [ ] 多图参考生成一张或多张候选。
-- [ ] 第一主图 + 蒙版 + 其他参考图。
-- [ ] 自定义合法尺寸。
-- [ ] quality / n / format / compression / moderation。
-- [ ] GPT Image 2 不发送 input_fidelity、不允许透明背景。
-- [ ] 上游 request ID 和真实输出元数据已保存。
+- [x] 文生图。
+- [x] 单图编辑。
+- [x] 多图参考生成一张或多张候选。
+- [x] 第一主图 + 蒙版 + 其他参考图。
+- [x] 自定义合法尺寸。
+- [x] quality / n / format / compression / moderation。
+- [x] GPT Image 2 不发送 input_fidelity、不允许透明背景。
+- [x] 上游 request ID 和真实输出元数据已保存。
 
 ### 任务与历史
 
 - [x] 排队、运行、保存、成功、失败、取消状态正确。
 - [x] 重启恢复。
-- [ ] 429/5xx 重试。
-- [ ] moderation/输入错误不重试。
+- [x] 429/5xx 重试。
+- [x] moderation/输入错误不重试。
 - [ ] 历史搜索、过滤、分页、收藏、标签。
 - [ ] 单张/批量下载和继续编辑。
 

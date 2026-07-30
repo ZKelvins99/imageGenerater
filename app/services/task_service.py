@@ -8,15 +8,17 @@ from typing import Any
 
 from app.repositories import jobs as job_repo
 from app.repositories.jobs import JobRecord
+from app.schemas.generation import GenerationRequest
 from app.schemas.models import TaskStatus
-from app.services import asset_service, history_service, image_service
+from app.services import asset_service, history_service, image_service, images_adapter
 from app.services.config_service import (
     OUTPUTS_DIR,
     ensure_dirs,
     load_settings,
     resolve_data_path,
 )
-from app.services.provider_service import get_active_provider
+from app.services.errors import AppError
+from app.services.provider_service import get_active_provider, get_provider
 
 BroadcastFn = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -300,8 +302,26 @@ class TaskManager:
         if job.status not in ("failed", "cancelled"):
             raise ValueError("仅失败或已取消的任务可重试")
         snap = dict(job.request_snapshot or {})
+        if snap.get("generation_api") == "v1" or snap.get("mode") in (
+            "generate",
+            "reference",
+            "edit_mask",
+        ):
+            req = GenerationRequest.model_validate(
+                {
+                    **snap,
+                    "prompt": snap.get("prompt") or "",
+                    "model": snap.get("model") or "",
+                }
+            )
+            return await self.start_generation(req, parent_job_id=job_id)
+        legacy_mode = str(snap.get("mode") or "text")
+        if legacy_mode in ("generate",):
+            legacy_mode = "text"
+        if legacy_mode in ("reference", "edit_mask"):
+            legacy_mode = "image"
         return await self.start_generate(
-            mode=str(snap.get("mode") or "text"),
+            mode=legacy_mode,
             prompt=str(snap.get("prompt") or ""),
             model=str(snap.get("model") or "") or None,
             size=str(snap.get("size") or "") or None,
@@ -312,6 +332,91 @@ class TaskManager:
             upload_filename=None,
             parent_job_id=job_id,
         )
+
+    async def start_generation(
+        self,
+        req: GenerationRequest,
+        *,
+        parent_job_id: str | None = None,
+    ) -> TaskStatus:
+        settings = load_settings()
+        profile = None
+        if req.provider_id:
+            profile = get_provider(req.provider_id)
+        else:
+            try:
+                profile = get_active_provider()
+            except Exception as e:
+                raise ValueError("没有可用的 Provider") from e
+
+        if not profile.base_url.strip():
+            raise ValueError("Base URL 未配置，请先在设置页填写")
+
+        model_name = (
+            req.model or profile.default_model or settings.default_model or ""
+        ).strip()
+        if not model_name:
+            raise ValueError("模型未选择")
+        req = req.model_copy(update={"model": model_name, "provider_id": profile.id})
+
+        task_id = uuid.uuid4().hex[:12]
+        history_id = uuid.uuid4().hex[:12]
+        now = _now()
+        ensure_dirs()
+
+        # Map to legacy history fields
+        legacy_mode = "text" if req.mode == "generate" else "image"
+        size_token = req.parsed_size().to_api_value()
+        ref_rel = None
+        if req.primary_asset_id or req.input_asset_ids:
+            from app.repositories import assets as asset_repo
+
+            aid = req.primary_asset_id or req.input_asset_ids[0]
+            asset = await asset_repo.get_asset(aid)
+            if asset:
+                ref_rel = asset.storage_path
+
+        snapshot = {
+            "generation_api": "v1",
+            **req.model_dump(),
+            # Keep legacy keys for history view
+            "mode": req.mode,
+            "legacy_mode": legacy_mode,
+            "size": size_token,
+            "reference_path": ref_rel,
+            "output_paths": [],
+        }
+        job = JobRecord(
+            id=task_id,
+            history_id=history_id,
+            status="queued",
+            progress_kind="stage",
+            progress=0.05,
+            request_snapshot=snapshot,
+            provider_id=profile.id,
+            upstream_request_id=None,
+            attempt_count=0,
+            error_code=None,
+            error_message_public=None,
+            error_detail_internal=None,
+            message="任务已排队",
+            created_at=now,
+            started_at=None,
+            finished_at=None,
+            parent_job_id=parent_job_id,
+        )
+        await job_repo.insert_job(job)
+        for i, aid in enumerate(req.input_asset_ids):
+            await job_repo.link_job_asset(task_id, aid, role="reference", position=i)
+        if req.mask_asset_id:
+            await job_repo.link_job_asset(
+                task_id, req.mask_asset_id, role="mask", position=0
+            )
+
+        status = job_to_task_status(job)
+        await self._emit(status)
+        await self._queue.put(task_id)
+        return status
 
     async def _run_job(self, job_id: str) -> None:
         job = await job_repo.get_job(job_id)
@@ -351,6 +456,11 @@ class TaskManager:
         quality = snap.get("quality") or "medium"
         n = int(snap.get("n") or 1)
         reference_path = snap.get("reference_path")
+        use_v1 = snap.get("generation_api") == "v1" or mode in (
+            "generate",
+            "reference",
+            "edit_mask",
+        )
 
         ok = await job_repo.update_job_status(
             job_id,
@@ -368,18 +478,58 @@ class TaskManager:
         await self._emit(job_to_task_status(job))
 
         try:
-            if mode == "text":
-                images = await image_service.generate_text_to_image(
+            result_images: list[Any] = []
+            upstream_request_id: str | None = None
+            sent_params: dict[str, Any] = {}
+            attempt_count = 1
+
+            if use_v1:
+                # Normalize legacy text/image if needed
+                gen_mode = mode
+                if mode == "text":
+                    gen_mode = "generate"
+                elif mode == "image":
+                    gen_mode = "reference"
+                req_data = {
+                    **snap,
+                    "mode": gen_mode,
+                    "prompt": prompt,
+                    "model": model,
+                    "size": size,
+                    "quality": quality,
+                    "n": n,
+                }
+                if gen_mode == "reference" and not req_data.get("input_asset_ids"):
+                    if snap.get("reference_asset_id"):
+                        req_data["input_asset_ids"] = [snap["reference_asset_id"]]
+                        req_data["primary_asset_id"] = snap["reference_asset_id"]
+                req = GenerationRequest.model_validate(req_data)
+                profile = None
+                if job.provider_id:
+                    try:
+                        profile = get_provider(job.provider_id)
+                    except Exception:
+                        profile = None
+                gen_result = await images_adapter.generate(req, profile=profile)
+                result_images = gen_result.images
+                upstream_request_id = gen_result.upstream_request_id
+                sent_params = gen_result.sent_params
+                attempt_count = gen_result.attempt_count
+            elif mode == "text":
+                blobs = await image_service.generate_text_to_image(
                     prompt=prompt,
                     model=model,
                     size=size,
                     quality=quality,
                     n=n,
                 )
+                result_images = [
+                    {"data": b, "extension": ".png", "mime": "image/png"} for b in blobs
+                ]
             else:
                 assert reference_path
                 path = resolve_data_path(str(reference_path))
-                images = await image_service.generate_image_to_image(
+                blobs = await image_service.generate_image_to_image(
                     prompt=prompt,
                     model=model,
                     size=size,
@@ -387,9 +537,11 @@ class TaskManager:
                     n=n,
                     image_path=path,
                 )
+                result_images = [
+                    {"data": b, "extension": ".png", "mime": "image/png"} for b in blobs
+                ]
 
             if await self._is_cancel_requested(job_id):
-                # Discard arrived results; do not save as success
                 await self._finalize_cancelled(job_id)
                 return
 
@@ -404,7 +556,6 @@ class TaskManager:
                 if await self._is_cancel_requested(job_id):
                     await self._finalize_cancelled(job_id)
                 return
-            # If we somehow entered saving from cancel_requested path, still cancel
             if await self._is_cancel_requested(job_id):
                 await self._finalize_cancelled(job_id)
                 return
@@ -413,33 +564,45 @@ class TaskManager:
             assert job is not None
             await self._emit(job_to_task_status(job))
 
-            # Also write legacy outputs/ path for /media compatibility
             day = datetime.now().strftime("%Y-%m-%d")
             out_dir = OUTPUTS_DIR / day
             out_dir.mkdir(parents=True, exist_ok=True)
             output_paths: list[str] = []
             urls: list[str] = []
-            for i, blob in enumerate(images):
+            for i, img in enumerate(result_images):
+                if hasattr(img, "data"):
+                    blob = img.data
+                    ext = img.extension or ".png"
+                    fname_hint = f"{job.history_id or job_id}_{i}{ext}"
+                else:
+                    blob = img["data"]
+                    ext = img.get("extension") or ".png"
+                    fname_hint = f"{job.history_id or job_id}_{i}{ext}"
+
                 asset = await asset_service.save_bytes_as_asset(
                     blob,
                     category="output",
-                    original_filename=f"{job.history_id or job_id}_{i}.png",
+                    original_filename=fname_hint,
                     parent_job_id=job_id,
                 )
                 await job_repo.link_job_asset(
                     job_id, asset.id, role="output", position=i
                 )
-                # Mirror into legacy outputs/ for older clients
-                suffix = f"_{i}" if len(images) > 1 else ""
-                fname = f"{job.history_id or job_id}{suffix}.png"
-                legacy = out_dir / fname
+                suffix = f"_{i}" if len(result_images) > 1 else ""
+                legacy_name = f"{job.history_id or job_id}{suffix}{ext}"
+                legacy = out_dir / legacy_name
                 legacy.write_bytes(blob)
-                rel = f"outputs/{day}/{fname}"
+                rel = f"outputs/{day}/{legacy_name}"
                 output_paths.append(rel)
                 urls.append(f"/media/{asset.storage_path}")
 
             snap = dict(job.request_snapshot)
             snap["output_paths"] = output_paths
+            if sent_params:
+                snap["sent_params"] = sent_params
+            if upstream_request_id:
+                snap["upstream_request_id"] = upstream_request_id
+            snap["attempt_count"] = attempt_count
             ok = await job_repo.update_job_status(
                 job_id,
                 new_status="succeeded",
@@ -449,6 +612,8 @@ class TaskManager:
                 finished_at=_now(),
                 request_snapshot=snap,
                 error_message_public="",
+                upstream_request_id=upstream_request_id,
+                attempt_count=attempt_count,
             )
             if not ok:
                 return
@@ -457,10 +622,13 @@ class TaskManager:
             status = job_to_task_status(final, urls)
             await self._emit(status)
 
-        except image_service.ImageAPIError as e:
+        except (image_service.ImageAPIError, AppError) as e:
             if await self._is_cancel_requested(job_id):
                 await self._finalize_cancelled(job_id)
                 return
+            code = getattr(e, "code", None) or "UPSTREAM_ERROR"
+            msg = getattr(e, "message", str(e))
+            req_id = getattr(e, "request_id", None)
             await job_repo.update_job_status(
                 job_id,
                 new_status="failed",
@@ -473,10 +641,11 @@ class TaskManager:
                 },
                 progress=1.0,
                 message="生成失败",
-                error_code="UPSTREAM_ERROR",
-                error_message_public=e.message,
-                error_detail_internal=e.message,
+                error_code=code,
+                error_message_public=msg,
+                error_detail_internal=msg,
                 finished_at=_now(),
+                upstream_request_id=req_id,
             )
             final = await job_repo.get_job(job_id)
             if final:

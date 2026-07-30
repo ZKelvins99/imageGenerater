@@ -12,6 +12,7 @@ from app.api import (
     asset_routes,
     config_routes,
     generate_routes,
+    generation_routes,
     job_routes,
     provider_routes,
     ws_routes,
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
 
     app.include_router(config_routes.router)
     app.include_router(generate_routes.router)
+    app.include_router(generation_routes.router)
     app.include_router(provider_routes.router)
     app.include_router(asset_routes.router)
     app.include_router(job_routes.router)
@@ -65,10 +67,21 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="File not found")
         return FileResponse(
             target,
+            media_type=_guess_media_type(target),
             headers={"X-Content-Type-Options": "nosniff"},
         )
 
     return app
+
+
+def _guess_media_type(path: Path) -> str:
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }.get(path.suffix.lower(), "application/octet-stream")
 
 
 app = create_app()

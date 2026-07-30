@@ -31,10 +31,17 @@ def output_url(relative: str) -> str:
 def _job_to_history(job: JobRecord) -> HistoryItem:
     snap = job.request_snapshot or {}
     status = LEGACY_FROM_JOB.get(job.status, "error")
+    raw_mode = str(snap.get("legacy_mode") or snap.get("mode") or "text")
+    if raw_mode in ("generate",):
+        mode = "text"
+    elif raw_mode in ("reference", "edit_mask", "image"):
+        mode = "image"
+    else:
+        mode = "text"
     return HistoryItem(
         id=job.history_id or job.id,
         created_at=job.created_at,
-        mode=str(snap.get("mode") or "text"),  # type: ignore[arg-type]
+        mode=mode,  # type: ignore[arg-type]
         model=str(snap.get("model") or ""),
         prompt=str(snap.get("prompt") or ""),
         size=str(snap.get("size") or ""),

@@ -69,4 +69,4 @@ uv pip install -r requirements-dev.txt
 
 CI 见 `.github/workflows/ci.yml`。测试全程使用 mock，不调用真实收费 API。
 
-进度见 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) §0（当前 Phase 0–2 已完成）。
+进度见 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) §0（当前 Phase 0–3 已完成）。

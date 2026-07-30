@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from app.services import image_service, provider_client
+from app.services import image_service, images_adapter, provider_client
 from app.services.provider_service import get_active_provider
 from tests.helpers import PNG_1X1
 
@@ -60,7 +60,8 @@ async def test_generate_text_to_image_mock(
         kwargs.pop("token_transport", None)
         return await original(profile, method, url, transport=transport, **kwargs)
 
-    monkeypatch.setattr(image_service, "request_with_401_retry", fake_request)
+    monkeypatch.setattr(provider_client, "request_with_401_retry", fake_request)
+    monkeypatch.setattr(images_adapter, "request_with_401_retry", fake_request)
 
     images = await image_service.generate_text_to_image(
         prompt="a red cube",
@@ -78,6 +79,7 @@ async def test_generate_text_to_image_mock(
 async def test_generate_image_to_image_mock(
     isolated_env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    await __import__("app.db.migrate", fromlist=["migrate"]).migrate()
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_1X1)
 
@@ -96,7 +98,8 @@ async def test_generate_image_to_image_mock(
         kwargs.pop("token_transport", None)
         return await original(profile, method, url, transport=transport, **kwargs)
 
-    monkeypatch.setattr(image_service, "request_with_401_retry", fake_request)
+    monkeypatch.setattr(provider_client, "request_with_401_retry", fake_request)
+    monkeypatch.setattr(images_adapter, "request_with_401_retry", fake_request)
 
     images = await image_service.generate_image_to_image(
         prompt="make it blue",
@@ -129,7 +132,8 @@ async def test_image_api_error_message(
         kwargs.pop("token_transport", None)
         return await original(profile, method, url, transport=transport, **kwargs)
 
-    monkeypatch.setattr(image_service, "request_with_401_retry", fake_request)
+    monkeypatch.setattr(provider_client, "request_with_401_retry", fake_request)
+    monkeypatch.setattr(images_adapter, "request_with_401_retry", fake_request)
 
     with pytest.raises(image_service.ImageAPIError) as ei:
         await image_service.generate_text_to_image(
@@ -141,11 +145,11 @@ async def test_image_api_error_message(
         )
     assert "moderation blocked" in ei.value.message
     assert ei.value.status_code == 400
+    assert ei.value.code == "MODERATION_BLOCKED"
 
 
 @pytest.mark.asyncio
 async def test_401_refreshes_token_once(isolated_env: Path) -> None:
-    """Upstream 401 -> invalidate + refresh + single replay."""
     state = {"calls": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
