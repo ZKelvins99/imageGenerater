@@ -26,7 +26,6 @@ htmlcov/
 build/
 dist/
 *.pyc
-app_icon.ico
 
 # OS / IDE
 .DS_Store

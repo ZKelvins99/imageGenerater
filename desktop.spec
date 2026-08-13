@@ -18,7 +18,11 @@ import os
 _icon = "app_icon.ico" if os.path.exists("app_icon.ico") else None
 
 # --- Collect static assets that must ship inside the exe --------------------
-datas = [("templates", "templates"), ("static", "static")]
+datas = [
+    ("templates", "templates"),
+    ("static", "static"),
+    ("app_icon.ico", "."),  # runtime window/taskbar icon (webview.start icon=)
+]
 binaries = []
 hiddenimports = []
 

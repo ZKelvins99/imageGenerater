@@ -16,7 +16,7 @@ import threading
 import time
 
 import uvicorn
-from app.paths import base_dir
+from app.paths import base_dir, bundle_dir
 from app.services import config_service
 
 
@@ -353,7 +353,11 @@ def main() -> None:
     window.events.closed += _on_closed
 
     try:
-        webview.start(debug=False)
+        # Window/taskbar icon — same mark as the in-app titlebar logo. In the
+        # packaged build this ships inside the bundle (see desktop.spec datas);
+        # in dev it resolves to the repo root.
+        icon_path = str(bundle_dir() / "app_icon.ico")
+        webview.start(debug=False, icon=icon_path)
     finally:
         server.should_exit = True
         thread.join(timeout=10)
