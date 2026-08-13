@@ -5,13 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light" />
   <title>ImageGenerater · AI 图像工作台</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/app.css" />
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script defer src="/static/js/vendor/alpine.min.js"></script>
 </head>
 <body x-data="imageStudio()" x-init="init()" @keydown.escape.window="closeOverlays()" @beforeunload.window="dispose()">
+  <div class="desktop-titlebar" x-show="isDesktop" x-cloak>
+    <div class="titlebar-drag" @pointerdown="winStartDrag($event)" @dblclick="winToggleMaximize()">
+      <span class="titlebar-brand-mark" aria-hidden="true">IG</span>
+      <span class="titlebar-title">ImageGenerater</span>
+      <span class="titlebar-subtitle">AI 图像工作台</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="window-btn" type="button" @click="winMinimize()" aria-label="最小化" title="最小化">─</button>
+      <button class="window-btn" type="button" @click="winToggleMaximize()" aria-label="最大化/还原" :title="isMaximized ? '还原' : '最大化'">
+        <span x-text="isMaximized ? '❐' : '□'"></span>
+      </button>
+      <button class="window-btn close" type="button" @click="winClose()" aria-label="关闭" title="关闭">×</button>
+    </div>
+  </div>
+  <div class="resize-handles" x-show="isDesktop" x-cloak>
+    <div class="rz rz-t" @pointerdown.prevent="winStartResize($event, 'top')"></div>
+    <div class="rz rz-b" @pointerdown.prevent="winStartResize($event, 'bottom')"></div>
+    <div class="rz rz-l" @pointerdown.prevent="winStartResize($event, 'left')"></div>
+    <div class="rz rz-r" @pointerdown.prevent="winStartResize($event, 'right')"></div>
+    <div class="rz rz-tl" @pointerdown.prevent="winStartResize($event, 'top_left')"></div>
+    <div class="rz rz-tr" @pointerdown.prevent="winStartResize($event, 'top_right')"></div>
+    <div class="rz rz-bl" @pointerdown.prevent="winStartResize($event, 'bottom_left')"></div>
+    <div class="rz rz-br" @pointerdown.prevent="winStartResize($event, 'bottom_right')"></div>
+  </div>
   <div class="app-shell" :class="{ 'nav-open': mobileNavOpen, 'studio-open': mobileStudioOpen }">
     <aside class="nav-panel" aria-label="历史与导航">
       <div class="brand-row">

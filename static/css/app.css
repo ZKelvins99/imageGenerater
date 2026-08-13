@@ -18,7 +18,7 @@
   --radius-xl: 28px;
   --radius-lg: 20px;
   --radius-md: 14px;
-  --font: "DM Sans", "Noto Sans SC", "Segoe UI", sans-serif;
+  --font: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
 }
 
 * {
@@ -84,6 +84,129 @@ button:disabled {
 img {
   display: block;
   max-width: 100%;
+}
+
+/* Frameless desktop titlebar (only visible when running inside pywebview). */
+body.desktop {
+  display: flex;
+  flex-direction: column;
+}
+
+.desktop-titlebar {
+  display: none;
+  flex: 0 0 40px;
+  align-items: stretch;
+  height: 40px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+body.desktop .desktop-titlebar {
+  display: flex;
+}
+
+.titlebar-drag {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  cursor: default;
+  touch-action: none;
+}
+
+.titlebar-brand-mark {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 28% 22%, #af9dff 0 11%, transparent 12%),
+    linear-gradient(145deg, #252521 0 48%, #44443b 100%);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.titlebar-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.titlebar-subtitle {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.titlebar-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.window-btn {
+  display: grid;
+  width: 46px;
+  height: 40px;
+  border: 0;
+  place-items: center;
+  color: var(--ink);
+  background: transparent;
+  font-size: 13px;
+  line-height: 1;
+  cursor: default;
+}
+
+.window-btn:hover {
+  background: rgba(23, 23, 20, 0.07);
+}
+
+.window-btn.close:hover {
+  color: #fff;
+  background: #c42b1c;
+}
+
+/* Frameless resize handles: thin invisible strips at the window edges. They
+   trigger native Win32 resize (the frameless window has no system border). */
+.resize-handles {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.resize-handles .rz {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.rz-t { top: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.rz-b { bottom: 0; left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.rz-l { left: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.rz-r { right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+/* Corners: bigger grab area and painted above the edge strips. */
+.rz-tl, .rz-tr, .rz-bl, .rz-br {
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+}
+.rz-tl { top: 0; left: 0; cursor: nwse-resize; }
+.rz-tr { top: 0; right: 0; cursor: nesw-resize; }
+.rz-bl { bottom: 0; left: 0; cursor: nesw-resize; }
+.rz-br { bottom: 0; right: 0; cursor: nwse-resize; }
+
+body.desktop .app-shell {
+  flex: 1 1 auto;
+  height: auto;
 }
 
 .app-shell {
@@ -1559,13 +1682,13 @@ img {
 .settings-modal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(920px, 100%);
-  max-height: min(760px, 92vh);
+  width: min(1120px, 100%);
+  max-height: min(800px, 92vh);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 25px;
+  border: 1px solid rgba(215, 214, 207, 0.8);
+  border-radius: 26px;
   background: #fff;
-  box-shadow: 0 35px 100px rgba(20, 20, 17, 0.28);
+  box-shadow: 0 40px 120px rgba(20, 20, 17, 0.32);
 }
 
 .settings-modal > header {
@@ -1573,52 +1696,54 @@ img {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--line);
-  padding: 18px 22px;
+  padding: 20px 26px;
 }
 
 .settings-modal h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 21px;
   letter-spacing: -0.025em;
 }
 
 .settings-layout {
   display: grid;
   min-height: 0;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 262px minmax(0, 1fr);
 }
 
 .provider-list {
   min-height: 0;
   overflow: auto;
   border-right: 1px solid var(--line);
-  padding: 13px 10px;
+  padding: 14px 12px;
   background: #f6f6f1;
 }
 
 .provider-list > button:not(.add-provider) {
   display: grid;
-  grid-template-columns: 8px 1fr auto;
+  grid-template-columns: 9px 1fr auto;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
   width: 100%;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   border: 1px solid transparent;
-  border-radius: 11px;
-  padding: 10px;
+  border-radius: 12px;
+  padding: 12px 12px;
   background: transparent;
   text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 .provider-list > button:hover,
 .provider-list > button.active {
   border-color: var(--line);
   background: #fff;
+  box-shadow: 0 3px 10px rgba(26, 27, 21, 0.05);
 }
 
 .provider-list i {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--soft);
 }
@@ -1631,7 +1756,7 @@ img {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .provider-list strong,
@@ -1642,87 +1767,122 @@ img {
 }
 
 .provider-list strong {
-  font-size: 10px;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
 }
 
 .provider-list small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .provider-list b {
   border-radius: 999px;
-  padding: 3px 6px;
+  padding: 3px 8px;
   color: #456216;
   background: #eaf9bd;
-  font-size: 7px;
+  font-size: 10.5px;
+  font-weight: 600;
 }
 
 .provider-list .add-provider {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 10px;
   border: 1px dashed var(--line-strong);
-  border-radius: 11px;
-  padding: 10px;
+  border-radius: 12px;
+  padding: 12px;
   color: var(--muted);
   background: transparent;
-  font-size: 9px;
+  font-size: 13px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.provider-list .add-provider:hover {
+  color: var(--ink);
+  border-color: var(--soft);
+  background: #fff;
 }
 
 .provider-form {
   min-height: 0;
   overflow: auto;
-  padding: 22px;
+  padding: 26px 28px;
 }
 
-.form-grid,
-.distributor-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
+/* Provider modal scoped form fields — the base `.field` styles are shared with
+   the main workspace panel and stay small there, so bump sizes here. */
+.settings-modal .field > span {
+  font-size: 12px;
+}
+
+.settings-modal .field input,
+.settings-modal .field select {
+  height: 39px;
+  border-radius: 10px;
+  padding: 0 11px;
+  background: #fafaf7;
+  font-size: 13px;
+}
+
+.settings-modal .field input:focus,
+.settings-modal .field select:focus {
+  border-color: #9a8fe0;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(140, 121, 255, 0.12);
+}
+
+.settings-modal .field small {
+  font-size: 12px;
+}
+
+.settings-modal .form-grid,
+.settings-modal .distributor-fields {
+  gap: 15px;
 }
 
 .distributor-fields {
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 13px;
+  border-radius: 16px;
+  padding: 15px;
   background: #fafaf7;
 }
 
 .switch-row {
   display: flex;
-  gap: 22px;
-  margin-top: 18px;
+  gap: 26px;
+  margin-top: 20px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 13px 0;
+  padding: 14px 0;
 }
 
 .switch-row label {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 13px;
 }
 
 .switch-row input {
+  width: 16px;
+  height: 16px;
   accent-color: #24241f;
 }
 
 .provider-form footer {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
 .form-message {
-  min-height: 18px;
-  margin: 10px 0 0;
+  min-height: 20px;
+  margin: 12px 0 0;
   color: var(--success);
-  font-size: 9px;
+  font-size: 13px;
 }
 
 .form-message.error {
@@ -1731,28 +1891,28 @@ img {
 
 .test-result {
   display: grid;
-  gap: 6px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .test-result > span {
   display: grid;
-  grid-template-columns: 20px 100px 1fr;
+  grid-template-columns: 24px 110px 1fr;
   align-items: center;
-  border-radius: 9px;
-  padding: 7px 8px;
+  border-radius: 10px;
+  padding: 9px 11px;
   background: #f6f6f1;
 }
 
 .test-result i {
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: 19px;
+  height: 19px;
   place-items: center;
   border-radius: 50%;
   color: #fff;
   background: var(--soft);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
 }
 
@@ -1766,7 +1926,11 @@ img {
 
 .test-result b,
 .test-result small {
-  font-size: 8px;
+  font-size: 12.5px;
+}
+
+.test-result b {
+  font-weight: 600;
 }
 
 .test-result small {

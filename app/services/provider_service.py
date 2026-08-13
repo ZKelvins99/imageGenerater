@@ -128,9 +128,24 @@ def create_provider(body: ProviderCreate) -> ProviderPublic:
     active_id = settings.active_provider_id or pid
     if not settings.providers:
         active_id = pid
-    settings = settings.model_copy(
-        update={"providers": providers, "active_provider_id": active_id}
-    )
+    else:
+        current = next(
+            (p for p in settings.providers if p.id == active_id and not p.deleted),
+            None,
+        )
+        # Auto-activate the first real provider when the active one is still the
+        # unconfigured placeholder seeded on first run (empty base_url).
+        if current is None or not current.base_url.strip():
+            active_id = pid
+
+    flat: dict[str, object] = {"providers": providers, "active_provider_id": active_id}
+    if active_id == pid:
+        # The new provider becomes active: keep the legacy flat view in sync so
+        # save_settings() does not clobber its fields with stale values.
+        flat["base_url"] = profile.base_url
+        flat["default_model"] = profile.default_model or settings.default_model
+        flat["api_key"] = body.api_key or ""
+    settings = settings.model_copy(update=flat)
     save_settings(settings)
 
     secret = ProviderSecret(

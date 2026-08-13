@@ -141,6 +141,8 @@ function imageStudio() {
     mobileNavOpen: false,
     mobileStudioOpen: false,
     showProviderSettings: false,
+    isDesktop: false,
+    isMaximized: false,
     providerDraft: emptyProviderDraft(),
     connectionTest: null,
     providerMessage: "",
@@ -160,6 +162,14 @@ function imageStudio() {
     toasts: [],
 
     async init() {
+      this.isDesktop = typeof window.pywebview !== "undefined";
+      if (this.isDesktop) document.body.classList.add("desktop");
+      // pywebview injects window.pywebview *after* the page has finished
+      // loading, so re-check when it signals readiness (race otherwise).
+      window.addEventListener("pywebviewready", () => {
+        this.isDesktop = true;
+        document.body.classList.add("desktop");
+      });
       this.favorites = this.readLocalJson("ig:favorites", []);
       this.jobTags = this.readLocalJson("ig:jobTags", {});
       this.bindKeyboard();
@@ -169,6 +179,67 @@ function imageStudio() {
       await this.loadCapabilities();
       this.restoreActiveJob();
       this.connectWs();
+    },
+
+    winMinimize() {
+      window.pywebview?.api?.minimize();
+    },
+
+    async winToggleMaximize() {
+      if (!window.pywebview?.api) return;
+      this.isMaximized = await window.pywebview.api.toggle_maximize();
+    },
+
+    winClose() {
+      window.pywebview?.api?.close();
+    },
+
+    winStartDrag(event) {
+      const api = window.pywebview?.api;
+      if (!api) return;
+      event.preventDefault();
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch (_) {}
+      this._dragState = { lastX: event.screenX, lastY: event.screenY };
+      const onMove = (ev) => {
+        if (!this._dragState) return;
+        const dx = ev.screenX - this._dragState.lastX;
+        const dy = ev.screenY - this._dragState.lastY;
+        this._dragState = { lastX: ev.screenX, lastY: ev.screenY };
+        api.move_by(dx, dy);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        this._dragState = null;
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+
+    winStartResize(event, direction) {
+      const api = window.pywebview?.api;
+      if (!api) return;
+      event.preventDefault();
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch (_) {}
+      this._resizeState = { lastX: event.screenX, lastY: event.screenY, edge: direction };
+      const onMove = (ev) => {
+        if (!this._resizeState) return;
+        const dx = ev.screenX - this._resizeState.lastX;
+        const dy = ev.screenY - this._resizeState.lastY;
+        this._resizeState = { ...this._resizeState, lastX: ev.screenX, lastY: ev.screenY };
+        api.resize_by(dx, dy, this._resizeState.edge);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        this._resizeState = null;
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
     },
 
     dispose() {
@@ -1359,28 +1430,39 @@ function imageStudio() {
       this.providerMessage = "";
       this.providerMessageType = "";
       try {
+        const isNew = !this.providerDraft.id;
         const body = this.providerPayload();
-        let saved;
-        if (this.providerDraft.id) {
-          saved = await apiRequest(
-            `/api/v1/providers/${encodeURIComponent(this.providerDraft.id)}`,
-            {
-              method: "PATCH",
+        const saved = isNew
+          ? await apiRequest("/api/v1/providers", {
+              method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(body),
-            },
-          );
-        } else {
-          saved = await apiRequest("/api/v1/providers", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-        }
+            })
+          : await apiRequest(
+              `/api/v1/providers/${encodeURIComponent(this.providerDraft.id)}`,
+              {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              },
+            );
         await this.loadProviders();
         const targetId = saved.id || this.providerDraft.id;
         const target = this.providers.find((item) => item.id === targetId);
         if (target) await this.editProvider(target);
+        if (isNew) {
+          // 新建连接后立即切换并激活，避免仍停留在空的 Default 上。
+          this.providerId = targetId;
+          await this.changeProvider();
+        } else if (this.providerId === targetId) {
+          // 编辑的是当前激活连接：改了默认模型则同步主界面的模型选择，
+          // 再刷新模型列表与能力。
+          if (target?.default_model && target.default_model !== this.model) {
+            this.model = target.default_model;
+          }
+          await this.loadModels();
+          await this.loadCapabilities();
+        }
         this.providerMessage = "连接已保存";
         this.notify("连接配置已保存");
       } catch (error) {

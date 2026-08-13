@@ -48,6 +48,44 @@ async def test_create_provider_secret_not_echoed(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_first_real_provider_auto_activates(client: AsyncClient) -> None:
+    """Creating the first configured provider (over the empty placeholder
+    default) must activate it and preserve its base_url/default_model."""
+    # Simulate first-run: the seeded default is an unconfigured placeholder.
+    res = await client.patch("/api/v1/providers/default", json={"base_url": ""})
+    assert res.status_code == 200
+
+    res = await client.post(
+        "/api/v1/providers",
+        json={
+            "name": "公司生产环境",
+            "base_url": "https://api.example.test/v1",
+            "default_model": "gpt-image-2",
+            "api_key": "sk-new-key-12345678",
+        },
+    )
+    assert res.status_code == 201
+    body = res.json()
+    assert body["is_active"] is True
+    assert body["base_url"] == "https://api.example.test/v1"
+    assert body["default_model"] == "gpt-image-2"
+
+    items = (await client.get("/api/v1/providers")).json()["items"]
+    by_id = {p["id"]: p for p in items}
+    assert by_id["default"]["is_active"] is False
+    assert by_id["default"]["base_url"] == ""
+    assert by_id[body["id"]]["is_active"] is True
+    assert by_id[body["id"]]["base_url"] == "https://api.example.test/v1"
+
+    # Legacy flat settings view must reflect the newly active provider.
+    settings = (await client.get("/api/settings")).json()
+    assert settings["active_provider_id"] == body["id"]
+    assert settings["base_url"] == "https://api.example.test/v1"
+    assert settings["default_model"] == "gpt-image-2"
+
+
+
+@pytest.mark.asyncio
 async def test_activate_and_legacy_settings_sync(client: AsyncClient) -> None:
     await client.post(
         "/api/v1/providers",

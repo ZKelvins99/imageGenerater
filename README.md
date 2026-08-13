@@ -14,6 +14,33 @@ python run.py
 
 浏览器打开：http://127.0.0.1:27183
 
+## 桌面版（Windows）
+
+将同一个 FastAPI 后端 + Web 前端打包成原生窗口应用（WebView2，不捆绑 Chromium）。
+
+**开发调试（直接在窗口里跑）：**
+
+```powershell
+uv venv
+.\.venv\Scripts\Activate.ps1
+uv pip install -r requirements-desktop.txt
+python desktop.py
+```
+
+**打包安装器：**
+
+```powershell
+uv pip install -r requirements-desktop.txt pyinstaller
+.\.venv\Scripts\pyinstaller.exe --clean --noconfirm desktop.spec
+makensis installer\installer.nsi   # 产物：dist\ImageGenerater-Setup.exe
+```
+
+说明：
+
+- 打包后数据与配置落在 `%LOCALAPPDATA%\ImageGenerater`（`config/`、`data/`），不再写入安装目录；`app/paths.py` 统一解析，开发模式仍用项目根目录。
+- 前端已本地化 Alpine.js、移除 Google Fonts，可完全离线运行。
+- 图标：在仓库根目录放一个 `app_icon.ico` 即可被 spec 与 NSIS 自动引用。
+
 **首次必须在页面「设置」中自行填写：**
 
 - Base URL（你的 API 网关地址）

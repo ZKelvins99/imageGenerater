@@ -46,7 +46,6 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     )
     secrets.write_text('{"api_key": "sk-test-key-12345678"}\n', encoding="utf-8")
 
-    monkeypatch.setattr(config_service, "ROOT", root)
     monkeypatch.setattr(config_service, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(config_service, "SETTINGS_PATH", settings)
     monkeypatch.setattr(config_service, "SECRETS_PATH", secrets)

@@ -5,16 +5,14 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from app.paths import CONFIG_DIR, DATA_DIR
 from app.schemas.models import AppSettings, SettingsPublic, SettingsUpdate
 from app.schemas.provider import ProviderProfile, ProviderSecret
 
-ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = ROOT / "config"
 SETTINGS_PATH = CONFIG_DIR / "settings.json"
 SECRETS_PATH = CONFIG_DIR / "secrets.json"
 EXAMPLE_PATH = CONFIG_DIR / "settings.example.json"
 SECRETS_EXAMPLE_PATH = CONFIG_DIR / "secrets.example.json"
-DATA_DIR = ROOT / "data"
 OUTPUTS_DIR = DATA_DIR / "outputs"
 UPLOADS_DIR = DATA_DIR / "uploads"
 ASSETS_DIR = DATA_DIR / "assets"

@@ -20,10 +20,11 @@ from app.api import (
 )
 from app.db import connection as db_conn
 from app.db import migrate as db_migrate
+from app.paths import bundle_dir
 from app.services import config_service, jsonl_migration, task_service
 from app.services.config_service import ensure_dirs, load_settings
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = bundle_dir()
 TEMPLATES = Jinja2Templates(directory=str(ROOT / "templates"))
 
 

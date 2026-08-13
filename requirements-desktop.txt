@@ -1,0 +1,5 @@
+# Desktop build only — WebView2 shell + packaged data-dir resolution.
+# Not required to run the web server.
+-r requirements.txt
+pywebview>=5.3
+platformdirs>=4.2
