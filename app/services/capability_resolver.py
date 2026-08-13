@@ -72,7 +72,13 @@ def resolve_capabilities(
     profile: ProviderProfile | None = None,
 ) -> ModelCapabilities:
     mid = (model or "").strip().lower()
-    caps = BUILTIN.get(mid, CONSERVATIVE_CAPABILITIES).model_copy(deep=True)
+    # Gateway aliases like gpt-image-2-count share the same Images API surface
+    if mid in BUILTIN:
+        caps = BUILTIN[mid].model_copy(deep=True)
+    elif mid.startswith("gpt-image-2"):
+        caps = GPT_IMAGE_2_CAPABILITIES.model_copy(deep=True)
+    else:
+        caps = CONSERVATIVE_CAPABILITIES.model_copy(deep=True)
     if profile and profile.capability_overrides:
         # Shallow override of known fields only
         data = caps.model_dump()
